@@ -64,6 +64,7 @@ class NCVSpecialConfigManager:
         
         with open(self.config_file, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
+        
     
     def get_default_config_template(self):
         """デフォルト設定テンプレートを取得"""

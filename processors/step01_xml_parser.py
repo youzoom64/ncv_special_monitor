@@ -146,17 +146,17 @@ def create_integrated_json(lv_value, subfolder_name, broadcast_info, comments_da
 def save_json_files(lv_value, subfolder_name, integrated_data, comments_data):
     """JSONファイルを保存"""
     try:
-        # 出力ディレクトリを作成
-        broadcast_dir = os.path.join("SpecialUser", f"{subfolder_name}_{lv_value}")
+        # BroadCastData配下に保存するよう修正
+        broadcast_dir = os.path.join("SpecialUser", "BroadCastData", subfolder_name, lv_value)
         os.makedirs(broadcast_dir, exist_ok=True)
         
         # 統合JSONを保存
-        integrated_json_path = os.path.join(broadcast_dir, f"{lv_value}_data.json")
+        integrated_json_path = os.path.join(broadcast_dir, "data.json")
         with open(integrated_json_path, 'w', encoding='utf-8') as f:
             json.dump(integrated_data, f, ensure_ascii=False, indent=2)
         
         # コメントJSONを保存
-        comments_json_path = os.path.join(broadcast_dir, f"{lv_value}_comments.json")
+        comments_json_path = os.path.join(broadcast_dir, "comments.json")
         with open(comments_json_path, 'w', encoding='utf-8') as f:
             json.dump(comments_data, f, ensure_ascii=False, indent=2)
         

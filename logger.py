@@ -21,7 +21,7 @@ class NCVSpecialLogger:
         
         # ロガー設定
         self.logger = logging.getLogger('ncv_special_monitor')
-        self.logger.setLevel(self.log_level)
+        self.logger.setLevel(logging.INFO)
         self.logger.handlers.clear()  # 既存ハンドラをクリア
         
         # ファイルハンドラ

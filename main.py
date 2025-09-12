@@ -19,17 +19,17 @@ class NCVSpecialMonitorGUI:
         self.root = root
         self.root.title("NCV Special User Monitor")
         self.root.geometry("800x600")
-        
+
         # コンポーネント初期化
         self.config_manager = NCVSpecialConfigManager()
         self.logger = NCVSpecialLogger()
         self.pipeline_executor = PipelineExecutor(self.config_manager, self.logger)
         self.broadcast_detector = BroadcastEndDetector(self.config_manager, self.logger, self.pipeline_executor)
         self.file_monitor = NCVFolderMonitor(self.config_manager, self.logger, self.broadcast_detector)
-        
+
         # パイプラインエグゼキューターにファイルモニターを設定
         self.pipeline_executor.file_monitor = self.file_monitor
-        
+
         self.setup_gui()
         self.load_config()
         self.root.after(1000, self.update_log_display)
@@ -41,95 +41,102 @@ class NCVSpecialMonitorGUI:
             self.log_text.delete(1.0, tk.END)
             self.log_text.insert(tk.END, recent_logs)
             self.log_text.see(tk.END)
-        except Exception as e:
+        except Exception:
             pass
-        
         # 5秒後に再実行
         self.root.after(5000, self.update_log_display)
-
 
     def setup_gui(self):
         """GUI設定"""
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
+
         # NCVフォルダ設定
         ncv_frame = ttk.LabelFrame(main_frame, text="NCVフォルダ設定", padding="5")
         ncv_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        
+
         ttk.Label(ncv_frame, text="NCVフォルダパス:").grid(row=0, column=0, sticky=tk.W)
         self.ncv_path_var = tk.StringVar()
         self.ncv_path_entry = ttk.Entry(ncv_frame, textvariable=self.ncv_path_var, width=60)
         self.ncv_path_entry.grid(row=0, column=1, padx=(5, 5))
         ttk.Button(ncv_frame, text="参照", command=self.browse_ncv_folder).grid(row=0, column=2)
-        
+
         # 監視設定
         monitor_frame = ttk.LabelFrame(main_frame, text="監視設定", padding="5")
         monitor_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        
+
         self.monitor_enabled_var = tk.BooleanVar()
         ttk.Checkbutton(monitor_frame, text="監視を有効化", variable=self.monitor_enabled_var).grid(row=0, column=0, sticky=tk.W)
-        
+
         ttk.Label(monitor_frame, text="チェック間隔(分):").grid(row=1, column=0, sticky=tk.W)
         self.check_interval_var = tk.StringVar()
         ttk.Entry(monitor_frame, textvariable=self.check_interval_var, width=10).grid(row=1, column=1, sticky=tk.W, padx=(5, 0))
-        
+
         # API設定
         api_frame = ttk.LabelFrame(main_frame, text="API設定", padding="5")
         api_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        
+
         ttk.Label(api_frame, text="AI分析モデル:").grid(row=0, column=0, sticky=tk.W)
         self.ai_model_var = tk.StringVar()
         ai_model_combo = ttk.Combobox(api_frame, textvariable=self.ai_model_var, values=["openai-gpt4o", "google-gemini-2.5-flash"])
         ai_model_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0))
-        
+
         ttk.Label(api_frame, text="OpenAI APIキー:").grid(row=1, column=0, sticky=tk.W)
         self.openai_key_var = tk.StringVar()
         ttk.Entry(api_frame, textvariable=self.openai_key_var, width=50, show="*").grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(5, 0))
-        
+
         ttk.Label(api_frame, text="Google APIキー:").grid(row=2, column=0, sticky=tk.W)
         self.google_key_var = tk.StringVar()
         ttk.Entry(api_frame, textvariable=self.google_key_var, width=50, show="*").grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(5, 0))
-        
+
         # スペシャルユーザー設定
         users_frame = ttk.LabelFrame(main_frame, text="スペシャルユーザー設定", padding="5")
         users_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        
-        self.users_tree = ttk.Treeview(users_frame, columns=("user_id", "display_name", "ai_model", "custom_prompt"), show="headings", height=8)
+
+        # ★★★★★ 重要：prompt_value（隠し列）を追加して実データを保持する ★★★★★
+        self.users_tree = ttk.Treeview(
+            users_frame,
+            columns=("user_id", "display_name", "ai_model", "custom_prompt", "prompt_value"),
+            show="headings",
+            height=8
+        )
         self.users_tree.heading("user_id", text="ユーザーID")
         self.users_tree.heading("display_name", text="表示名")
         self.users_tree.heading("ai_model", text="AIモデル")
         self.users_tree.heading("custom_prompt", text="カスタムプロンプト")
+        # 隠し列（実データ保持用）
+        self.users_tree.heading("prompt_value", text="prompt_value")
         self.users_tree.column("user_id", width=100)
         self.users_tree.column("display_name", width=150)
         self.users_tree.column("ai_model", width=120)
         self.users_tree.column("custom_prompt", width=100)
+        self.users_tree.column("prompt_value", width=0, stretch=False)  # 非表示
         self.users_tree.grid(row=0, column=0, columnspan=4, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
+
         ttk.Button(users_frame, text="ユーザー追加", command=self.add_special_user).grid(row=1, column=0, pady=(5, 0), padx=(0, 5))
         ttk.Button(users_frame, text="ユーザー編集", command=self.edit_special_user).grid(row=1, column=1, pady=(5, 0), padx=(5, 5))
         ttk.Button(users_frame, text="ユーザー削除", command=self.remove_special_user).grid(row=1, column=2, pady=(5, 0), padx=(5, 0))
-        
+
         control_frame = ttk.Frame(main_frame)
         control_frame.grid(row=4, column=0, columnspan=2, pady=(10, 0))
-        
+
         self.start_button = ttk.Button(control_frame, text="監視開始", command=self.start_monitoring)
         self.start_button.grid(row=0, column=0, padx=(0, 5))
-        
+
         self.stop_button = ttk.Button(control_frame, text="監視停止", command=self.stop_monitoring, state=tk.DISABLED)
         self.stop_button.grid(row=0, column=1, padx=(5, 5))
-        
+
         ttk.Button(control_frame, text="設定保存", command=self.save_config).grid(row=0, column=2, padx=(5, 0))
-        
+
         log_frame = ttk.LabelFrame(main_frame, text="ログ", padding="5")
         log_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10, 0))
-        
+
         self.log_text = tk.Text(log_frame, height=10)
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         log_scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
         log_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         self.log_text.configure(yscrollcommand=log_scrollbar.set)
-        
+
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
@@ -139,25 +146,28 @@ class NCVSpecialMonitorGUI:
         users_frame.rowconfigure(0, weight=1)
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
-    
-
 
     def browse_ncv_folder(self):
         folder = filedialog.askdirectory()
         if folder:
             self.ncv_path_var.set(folder)
-    
+
     def add_special_user(self):
         dialog = UserEditDialog(self.root)
         self.root.wait_window(dialog.dialog)
         if dialog.result:
             user_data = dialog.result
-            self.users_tree.insert("", tk.END, values=(
-                user_data["user_id"],
-                user_data["display_name"],
-                user_data["analysis_ai_model"],
-                "設定済み" if user_data["analysis_prompt"] else "デフォルト"
-            ))
+            self.users_tree.insert(
+                "",
+                tk.END,
+                values=(
+                    user_data["user_id"],
+                    user_data["display_name"],
+                    user_data["analysis_ai_model"],
+                    "設定済み" if user_data.get("analysis_prompt", "").strip() else "デフォルト",
+                    user_data.get("analysis_prompt", "")
+                )
+            )
 
     def edit_special_user(self):
         selected = self.users_tree.selection()
@@ -166,25 +176,35 @@ class NCVSpecialMonitorGUI:
             return
         values = self.users_tree.item(selected[0], "values")
         user_id = values[0]
+
+        # 既存設定をロードしてダイアログに渡す
         config = self.config_manager.load_config()
         users = config.get("special_users_config", {}).get("users", {})
         user_config = users.get(user_id, {})
+        # TreeView の prompt_value が最新なので上書きして渡す
+        if len(values) >= 5:
+            user_config = {**user_config, "analysis_prompt": values[4]}
+
         dialog = UserEditDialog(self.root, user_config)
         self.root.wait_window(dialog.dialog)
         if dialog.result:
             user_data = dialog.result
-            self.users_tree.item(selected[0], values=(
-                user_data["user_id"],
-                user_data["display_name"],
-                user_data["analysis_ai_model"],
-                "設定済み" if user_data["analysis_prompt"] else "デフォルト"
-            ))
+            self.users_tree.item(
+                selected[0],
+                values=(
+                    user_data["user_id"],
+                    user_data["display_name"],
+                    user_data["analysis_ai_model"],
+                    "設定済み" if user_data.get("analysis_prompt", "").strip() else "デフォルト",
+                    user_data.get("analysis_prompt", "")
+                )
+            )
 
     def remove_special_user(self):
         selected = self.users_tree.selection()
         if selected:
             self.users_tree.delete(selected)
-    
+
     def load_config(self):
         config = self.config_manager.load_config()
         self.ncv_path_var.set(config.get("ncv_folder_path", ""))
@@ -194,80 +214,111 @@ class NCVSpecialMonitorGUI:
         self.ai_model_var.set(api_settings.get("summary_ai_model", "openai-gpt4o"))
         self.openai_key_var.set(api_settings.get("openai_api_key", ""))
         self.google_key_var.set(api_settings.get("google_api_key", ""))
+
         special_users_config = config.get("special_users_config", {})
         users = special_users_config.get("users", {})
+
+        # 一旦クリア
         for item in self.users_tree.get_children():
             self.users_tree.delete(item)
+
+        # JSON -> TreeView（prompt_value も入れる）
         for user_id, user_config in users.items():
             display_name = user_config.get("display_name", f"ユーザー{user_id}")
             ai_model = user_config.get("analysis_ai_model", "openai-gpt4o")
-            has_custom_prompt = bool(user_config.get("analysis_prompt", ""))
-            self.users_tree.insert("", tk.END, values=(
-                user_id,
-                display_name,
-                ai_model,
-                "設定済み" if has_custom_prompt else "デフォルト"
-            ))
-    
-    def save_config(self):
+            prompt_value = user_config.get("analysis_prompt", "")
+            has_custom_prompt = bool(prompt_value)
+            self.users_tree.insert(
+                "",
+                tk.END,
+                values=(
+                    user_id,
+                    display_name,
+                    ai_model,
+                    "設定済み" if has_custom_prompt else "デフォルト",
+                    prompt_value
+                )
+            )
+
+    def save_config(self, silent=False):
+        """TreeViewから直接 prompt_value を取得して保存（silent=True ならポップアップ非表示）"""
         try:
             config = self.config_manager.load_config()
             config["ncv_folder_path"] = self.ncv_path_var.get()
             config["monitor_enabled"] = self.monitor_enabled_var.get()
-            config["check_interval_minutes"] = int(self.check_interval_var.get())
+            config["check_interval_minutes"] = int(self.check_interval_var.get() or 5)
             config["api_settings"]["summary_ai_model"] = self.ai_model_var.get()
             config["api_settings"]["openai_api_key"] = self.openai_key_var.get()
             config["api_settings"]["google_api_key"] = self.google_key_var.get()
+
             existing_users = config.get("special_users_config", {}).get("users", {})
+            default_prompt = config.get("special_users_config", {}).get("default_analysis_prompt", "")
             current_tree_users = {}
+
             for item in self.users_tree.get_children():
                 values = self.users_tree.item(item, "values")
-                user_id = values[0]
-                if user_id in existing_users:
-                    current_tree_users[user_id] = existing_users[user_id]
+                if len(values) < 5:
+                    user_id = values[0]
+                    display_name = values[1] if len(values) > 1 else f"ユーザー{user_id}"
+                    ai_model = values[2] if len(values) > 2 else "openai-gpt4o"
+                    prompt_value = ""
                 else:
-                    current_tree_users[user_id] = {
-                        "user_id": user_id,
-                        "display_name": values[1],
-                        "analysis_enabled": True,
-                        "analysis_ai_model": values[2],
-                        "analysis_prompt": "",
-                        "template": "user_detail.html",
-                        "description": "",
-                        "tags": []
-                    }
+                    user_id, display_name, ai_model, _, prompt_value = values
+
+                base = existing_users.get(user_id, {
+                    "user_id": user_id,
+                    "analysis_enabled": True,
+                    "template": "user_detail.html",
+                    "description": "",
+                    "tags": []
+                }).copy()
+
+                base["display_name"] = display_name
+                base["analysis_ai_model"] = ai_model
+                base["analysis_prompt"] = (prompt_value or "").strip() or default_prompt
+
+                current_tree_users[user_id] = base
+
+            if "special_users_config" not in config:
+                config["special_users_config"] = {}
             config["special_users_config"]["users"] = current_tree_users
+
             self.config_manager.save_config(config)
-            messagebox.showinfo("成功", "設定を保存しました")
+
+            self.logger.info(f"設定保存成功: {len(current_tree_users)} ユーザーを保存しました")
+            for uid, cfg in current_tree_users.items():
+                preview = (cfg.get("analysis_prompt", "")[:50]).replace("\n", "\\n")
+                self.logger.info(f"[SAVE] {uid}: '{preview}'...")
+
+            if not silent:
+                messagebox.showinfo("成功", "設定を保存しました")
         except Exception as e:
+            self.logger.error(f"設定保存エラー: {str(e)}")
             messagebox.showerror("エラー", f"設定保存エラー: {str(e)}")
-    
-    # main.pyのstart_monitoringメソッドに追加
+
+
     def start_monitoring(self):
         try:
-            self.save_config()
+            self.save_config(silent=True)  # ← ポップアップを抑制
             self.file_monitor.start_monitoring()
-            
+
             # ★ テスト用：5秒後に状況を確認
-            def check_status():
-                monitor_status = self.file_monitor.get_monitoring_status()
-                detector_status = self.broadcast_detector.get_detection_status()
-                
-                print(f"監視状況: {monitor_status}")
-                print(f"検出状況: {detector_status}")
-                
-                # さらに5秒後にもう一度チェック
-                self.root.after(5000, check_status)
-            
-            self.root.after(5000, check_status)
-            
+            # def check_status():
+            #     monitor_status = self.file_monitor.get_monitoring_status()
+            #     detector_status = self.broadcast_detector.get_detection_status()
+            #     print(f"監視状況: {monitor_status}")
+            #     print(f"検出状況: {detector_status}")
+            #     self.root.after(5000, check_status)
+
+            # self.root.after(5000, check_status)
+
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
             self.log_text.insert(tk.END, "監視を開始しました\n")
             self.log_text.see(tk.END)
         except Exception as e:
             messagebox.showerror("エラー", f"監視開始エラー: {str(e)}")
-        
+
     def stop_monitoring(self):
         try:
             self.file_monitor.stop_monitoring()
@@ -289,9 +340,10 @@ class UserEditDialog:
         self.dialog.geometry("500x600")
         self.dialog.transient(parent)
         self.dialog.grab_set()
+
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
+
         ttk.Label(main_frame, text="ユーザーID:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
         self.user_id_var = tk.StringVar(value=self.user_config.get("user_id", ""))
         user_id_frame = ttk.Frame(main_frame)
@@ -300,19 +352,19 @@ class UserEditDialog:
         self.user_id_entry.grid(row=0, column=0, sticky=(tk.W, tk.E))
         self.fetch_button = ttk.Button(user_id_frame, text="名前取得", command=self.fetch_user_name)
         self.fetch_button.grid(row=0, column=1, padx=(5, 0))
-        
+
         ttk.Label(main_frame, text="表示名:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
         self.display_name_var = tk.StringVar(value=self.user_config.get("display_name", ""))
         ttk.Entry(main_frame, textvariable=self.display_name_var, width=35).grid(row=1, column=1, columnspan=2, sticky=(tk.W, tk.E), padx=5, pady=5)
-        
+
         ttk.Label(main_frame, text="AIモデル:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
         self.ai_model_var = tk.StringVar(value=self.user_config.get("analysis_ai_model", "openai-gpt4o"))
         ai_model_combo = ttk.Combobox(main_frame, textvariable=self.ai_model_var, values=["openai-gpt4o", "google-gemini-2.5-flash"])
         ai_model_combo.grid(row=2, column=1, columnspan=2, sticky=(tk.W, tk.E), padx=5, pady=5)
-        
+
         self.analysis_enabled_var = tk.BooleanVar(value=self.user_config.get("analysis_enabled", True))
         ttk.Checkbutton(main_frame, text="AI分析を有効化", variable=self.analysis_enabled_var).grid(row=3, column=1, sticky=tk.W, padx=5, pady=5)
-        
+
         ttk.Label(main_frame, text="カスタムプロンプト:").grid(row=4, column=0, padx=5, pady=5, sticky=(tk.W, tk.N))
         prompt_frame = ttk.Frame(main_frame)
         prompt_frame.grid(row=4, column=1, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
@@ -321,28 +373,32 @@ class UserEditDialog:
         prompt_scrollbar = ttk.Scrollbar(prompt_frame, orient=tk.VERTICAL, command=self.prompt_text.yview)
         prompt_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         self.prompt_text.configure(yscrollcommand=prompt_scrollbar.set)
-        default_prompt = """以下のユーザーのコメント履歴を分析して、このユーザーの特徴、傾向、配信との関わり方について詳しく分析してください。
 
-分析観点：
-- コメントの頻度と投稿タイミング
-- コメント内容の傾向（質問、感想、ツッコミなど）
-- 配信者との関係性
-- 他の視聴者との関わり
-- このユーザーの配信に対する貢献度
-- 特徴的な発言や行動パターン"""
+        default_prompt = (
+            "以下のユーザーのコメント履歴を分析して、このユーザーの特徴、傾向、配信との関わり方について詳しく分析してください。\n\n"
+            "分析観点：\n"
+            "- コメントの頻度と投稿タイミング\n"
+            "- コメント内容の傾向（質問、感想、ツッコミなど）\n"
+            "- 配信者との関係性\n"
+            "- 他の視聴者との関わり\n"
+            "- このユーザーの配信に対する貢献度\n"
+            "- 特徴的な発言や行動パターン"
+        )
         current_prompt = self.user_config.get("analysis_prompt", default_prompt)
+        if not (current_prompt or "").strip():
+            current_prompt = default_prompt
         self.prompt_text.insert("1.0", current_prompt)
-        
+
         ttk.Label(main_frame, text="説明・メモ:").grid(row=5, column=0, padx=5, pady=5, sticky=(tk.W, tk.N))
         self.description_text = tk.Text(main_frame, height=3, width=50)
         self.description_text.grid(row=5, column=1, columnspan=2, sticky=(tk.W, tk.E), padx=5, pady=5)
         self.description_text.insert("1.0", self.user_config.get("description", ""))
-        
+
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=6, column=0, columnspan=3, pady=20)
         ttk.Button(button_frame, text="保存", command=self.ok_clicked).grid(row=0, column=0, padx=5)
         ttk.Button(button_frame, text="キャンセル", command=self.cancel_clicked).grid(row=0, column=1, padx=5)
-        
+
         self.dialog.columnconfigure(0, weight=1)
         self.dialog.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
@@ -410,12 +466,25 @@ class UserEditDialog:
             return
         if not display_name:
             display_name = f"ユーザー{user_id}"
+        prompt_value = (self.prompt_text.get("1.0", tk.END) or "").strip()
+        # 空ならデフォルトで補完（空で上書きされる事故を防止）
+        if not prompt_value:
+            prompt_value = (
+                "以下のユーザーのコメント履歴を分析して、このユーザーの特徴、傾向、配信との関わり方について詳しく分析してください。\n\n"
+                "分析観点：\n"
+                "- コメントの頻度と投稿タイミング\n"
+                "- コメント内容の傾向（質問、感想、ツッコミなど）\n"
+                "- 配信者との関係性\n"
+                "- 他の視聴者との関わり\n"
+                "- このユーザーの配信に対する貢献度\n"
+                "- 特徴的な発言や行動パターン"
+            )
         self.result = {
             "user_id": user_id,
             "display_name": display_name,
             "analysis_enabled": self.analysis_enabled_var.get(),
             "analysis_ai_model": self.ai_model_var.get(),
-            "analysis_prompt": self.prompt_text.get("1.0", tk.END).strip(),
+            "analysis_prompt": prompt_value,
             "template": "user_detail.html",
             "description": self.description_text.get("1.0", tk.END).strip(),
             "tags": []

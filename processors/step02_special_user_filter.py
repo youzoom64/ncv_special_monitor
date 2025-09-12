@@ -118,12 +118,18 @@ def analyze_single_user(user_data, config):
     user_id = user_data['user_id']
     comments = user_data['comments']
     
-    # API設定を取得
-    api_settings = config.get("api_settings", {})
-    ai_model = api_settings.get("summary_ai_model", "openai-gpt4o")
-    
     if not comments:
         return "分析対象のコメントがありません。"
+    
+    # special_users_configからAI設定を取得
+    special_users_config = config.get("special_users_config", {})
+    ai_model = special_users_config.get("default_analysis_ai_model", "openai-gpt4o")
+    analysis_enabled = special_users_config.get("default_analysis_enabled", True)
+    
+    print(f"AI分析設定 - モデル: {ai_model}, 有効: {analysis_enabled}")
+    
+    if not analysis_enabled:
+        return generate_basic_analysis(comments)
     
     try:
         if ai_model == "openai-gpt4o":
@@ -131,6 +137,7 @@ def analyze_single_user(user_data, config):
         elif ai_model == "google-gemini-2.5-flash":
             return generate_gemini_analysis(user_data, config)
         else:
+            print(f"不明なAIモデル: {ai_model}")
             return generate_basic_analysis(comments)
     except Exception as e:
         print(f"AI分析エラー ({ai_model}): {str(e)}")
@@ -158,9 +165,18 @@ def generate_openai_analysis(user_data, config):
         
         user_data_text = "\n".join(comment_texts)
         
-        # プロンプトを構築
+        # ユーザー個別のプロンプトを取得
         special_users_config = config.get("special_users_config", {})
-        analysis_prompt = special_users_config.get("default_analysis_prompt", "")
+        users_config = special_users_config.get("users", {})
+        user_id = user_data['user_id']
+        
+        # 個別ユーザー設定があるかチェック
+        if user_id in users_config and users_config[user_id].get("analysis_prompt"):
+            analysis_prompt = users_config[user_id]["analysis_prompt"]
+            print(f"個別プロンプト使用: {user_id}")
+        else:
+            analysis_prompt = special_users_config.get("default_analysis_prompt", "")
+            print(f"デフォルトプロンプト使用: {user_id}")
         
         full_prompt = f"""
 {analysis_prompt}
@@ -192,10 +208,12 @@ def generate_openai_analysis(user_data, config):
         ai_result = response.choices[0].message.content.strip()
         
         # 分析結果にメタ情報を追加
+        prompt_type = "個別プロンプト" if (user_id in users_config and users_config[user_id].get("analysis_prompt")) else "デフォルトプロンプト"
         metadata = f"""
 <div style="background-color: #f0f8ff; padding: 10px; margin: 10px 0; border-left: 4px solid #0066cc;">
 <strong>AI分析情報</strong><br>
 分析モデル: OpenAI GPT-4o<br>
+プロンプト: {prompt_type}<br>
 分析日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br>
 分析対象: {len(user_data['comments'])}件のコメント
 </div>
@@ -233,9 +251,18 @@ def generate_gemini_analysis(user_data, config):
         
         user_data_text = "\n".join(comment_texts)
         
-        # プロンプトを構築
+        # ユーザー個別のプロンプトを取得
         special_users_config = config.get("special_users_config", {})
-        analysis_prompt = special_users_config.get("default_analysis_prompt", "")
+        users_config = special_users_config.get("users", {})
+        user_id = user_data['user_id']
+        
+        # 個別ユーザー設定があるかチェック
+        if user_id in users_config and users_config[user_id].get("analysis_prompt"):
+            analysis_prompt = users_config[user_id]["analysis_prompt"]
+            print(f"個別プロンプト使用: {user_id}")
+        else:
+            analysis_prompt = special_users_config.get("default_analysis_prompt", "")
+            print(f"デフォルトプロンプト使用: {user_id}")
         
         full_prompt = f"""
 {analysis_prompt}
@@ -253,10 +280,12 @@ def generate_gemini_analysis(user_data, config):
 
         response = model.generate_content(full_prompt)
         
+        prompt_type = "個別プロンプト" if (user_id in users_config and users_config[user_id].get("analysis_prompt")) else "デフォルトプロンプト"
         metadata = f"""
 <div style="background-color: #f0f8ff; padding: 10px; margin: 10px 0; border-left: 4px solid #0066cc;">
 <strong>AI分析情報</strong><br>
 分析モデル: Google Gemini 2.0 Flash<br>
+プロンプト: {prompt_type}<br>
 分析日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br>
 分析対象: {len(user_data['comments'])}件のコメント
 </div>

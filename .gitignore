@@ -1,0 +1,36 @@
+# Python キャッシュ
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 仮想環境
+venv/
+.env/
+.venv/
+
+# ログファイル
+logs/
+*.log
+
+# OS依存ファイル
+.DS_Store
+Thumbs.db
+
+# エディタ設定
+.vscode/
+.idea/
+
+# バックアップや一時ファイル
+*.swp
+*.swo
+*~
+*.tmp
+
+# 出力物
+*.html
+*.json
+*.csv
+
+# Pipenv / Poetry
+Pipfile.lock
+poetry.lock

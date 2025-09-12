@@ -18,10 +18,14 @@ class NCVFolderMonitor:
         """監視開始"""
         if not self.running:
             self.running = True
+            
+            # ★ 開始時に既存XMLファイルをスキャンして放送終了検出を開始
+            self._initial_scan_existing_xmls()
+            
             self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
             self.thread.start()
             self.logger.info("NCVフォルダ監視を開始しました")
-    
+        
     def stop_monitoring(self):
         """監視停止"""
         self.running = False
@@ -56,9 +60,8 @@ class NCVFolderMonitor:
             self.logger.error(f"XMLスキャンエラー: {str(e)}")
     
     def _is_ncv_xml_file(self, filename):
-        """NCVのXMLファイルかチェック（より厳密なパターン）"""
-        # 例：ncvLog_lv123456_20250913_123045.xml
-        pattern = r'^ncvLog_lv\d+_\d{8}_\d{6}\.xml$'
+        """NCVのXMLファイルかチェック"""
+        pattern = r'^ncvLog_lv\d+.*\.xml$'  # 元のパターンに戻す
         return re.match(pattern, filename) is not None
 
     def _monitor_loop(self):
@@ -152,3 +155,47 @@ class NCVFolderMonitor:
             'monitored_count': len(self.monitored_xmls),
             'monitored_files': list(self.monitored_xmls.keys())
         }
+
+
+    def _initial_scan_existing_xmls(self):
+        """開始時に既存XMLファイルをスキャンして検出開始"""
+        try:
+            config = self.config_manager.load_config()
+            ncv_path = config.get("ncv_folder_path", "")
+            
+            if not os.path.exists(ncv_path):
+                return
+                
+            self.logger.info(f"[DEBUG] 開始時既存XMLスキャン: {ncv_path}")
+            
+            for subfolder in os.listdir(ncv_path):
+                subfolder_path = os.path.join(ncv_path, subfolder)
+                
+                if not os.path.isdir(subfolder_path):
+                    continue
+                    
+                for filename in os.listdir(subfolder_path):
+                    if self._is_ncv_xml_file(filename):
+                        xml_path = os.path.join(subfolder_path, filename)
+                        
+                        # 処理済みはスキップ
+                        if self.config_manager.is_processed(xml_path):
+                            continue
+                        
+                        # 監視リストに追加
+                        lv_value = self._extract_lv_value(xml_path)
+                        if lv_value:
+                            self.monitored_xmls[xml_path] = {
+                                'lv_value': lv_value,
+                                'subfolder_name': subfolder,
+                                'start_time': datetime.now(),
+                                'status': 'monitoring'
+                            }
+                            
+                            self.logger.info(f"[DEBUG] 既存XML検出・監視開始: {lv_value}")
+                            
+                            # ★ 重要：放送終了検出を開始
+                            self.broadcast_detector.start_detection(xml_path, lv_value, subfolder)
+                            
+        except Exception as e:
+            self.logger.error(f"初期XMLスキャンエラー: {str(e)}")

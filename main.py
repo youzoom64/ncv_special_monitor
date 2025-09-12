@@ -32,7 +32,22 @@ class NCVSpecialMonitorGUI:
         
         self.setup_gui()
         self.load_config()
+        self.root.after(1000, self.update_log_display)
+
+    def update_log_display(self):
+        """ログ表示を定期更新"""
+        try:
+            recent_logs = self.logger.get_recent_logs(20)  # 最新20行
+            self.log_text.delete(1.0, tk.END)
+            self.log_text.insert(tk.END, recent_logs)
+            self.log_text.see(tk.END)
+        except Exception as e:
+            pass
         
+        # 5秒後に再実行
+        self.root.after(5000, self.update_log_display)
+
+
     def setup_gui(self):
         """GUI設定"""
         main_frame = ttk.Frame(self.root, padding="10")
@@ -125,6 +140,8 @@ class NCVSpecialMonitorGUI:
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
     
+
+
     def browse_ncv_folder(self):
         folder = filedialog.askdirectory()
         if folder:
@@ -225,17 +242,32 @@ class NCVSpecialMonitorGUI:
         except Exception as e:
             messagebox.showerror("エラー", f"設定保存エラー: {str(e)}")
     
+    # main.pyのstart_monitoringメソッドに追加
     def start_monitoring(self):
         try:
             self.save_config()
             self.file_monitor.start_monitoring()
+            
+            # ★ テスト用：5秒後に状況を確認
+            def check_status():
+                monitor_status = self.file_monitor.get_monitoring_status()
+                detector_status = self.broadcast_detector.get_detection_status()
+                
+                print(f"監視状況: {monitor_status}")
+                print(f"検出状況: {detector_status}")
+                
+                # さらに5秒後にもう一度チェック
+                self.root.after(5000, check_status)
+            
+            self.root.after(5000, check_status)
+            
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
             self.log_text.insert(tk.END, "監視を開始しました\n")
             self.log_text.see(tk.END)
         except Exception as e:
             messagebox.showerror("エラー", f"監視開始エラー: {str(e)}")
-    
+        
     def stop_monitoring(self):
         try:
             self.file_monitor.stop_monitoring()

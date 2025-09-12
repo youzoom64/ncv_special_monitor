@@ -29,38 +29,7 @@ class NCVFolderMonitor:
             self.thread.join(timeout=10)
         self.logger.info("NCVフォルダ監視を停止しました")
     
-    def _monitor_loop(self):
-        """監視ループ"""
-        while self.running:
-            try:
-                config = self.config_manager.load_config()
-                
-                if not config.get("monitor_enabled", True):
-                    self.logger.debug("[DEBUG] 監視無効 → 60秒待機")
-                    time.sleep(60)
-                    continue
-                
-                ncv_path = config.get("ncv_folder_path", "")
-                if not os.path.exists(ncv_path):
-                    self.logger.warning(f"NCVフォルダが存在しません: {ncv_path}")
-                    time.sleep(60)
-                    continue
-                
-                self.logger.debug("[DEBUG] 新規XMLスキャン開始")
-                # 新規XMLファイルを検索
-                self._scan_for_new_xmls(ncv_path)
-                
-                self.logger.debug(f"[DEBUG] 現在監視中XML数: {len(self.monitored_xmls)}")
-                # 既存の監視中XMLをチェック
-                self._check_monitored_xmls()
-                
-                self.logger.debug("[DEBUG] 次回スキャンまで10秒待機")
-                time.sleep(10)  # ★ 30秒 → 10秒 に短縮
-                
-            except Exception as e:
-                self.logger.error(f"監視ループエラー: {str(e)}")
-                time.sleep(60)
-    
+  
     def _scan_for_new_xmls(self, ncv_path):
         """新規XMLファイルをスキャン"""
         try:
@@ -87,9 +56,48 @@ class NCVFolderMonitor:
             self.logger.error(f"XMLスキャンエラー: {str(e)}")
     
     def _is_ncv_xml_file(self, filename):
-        """NCVのXMLファイルかチェック"""
-        pattern = r'^ncvLog_lv\d+.*\.xml$'
+        """NCVのXMLファイルかチェック（より厳密なパターン）"""
+        # 例：ncvLog_lv123456_20250913_123045.xml
+        pattern = r'^ncvLog_lv\d+_\d{8}_\d{6}\.xml$'
         return re.match(pattern, filename) is not None
+
+    def _monitor_loop(self):
+        """監視ループ"""
+        while self.running:
+            try:
+                config = self.config_manager.load_config()
+                
+                if not config.get("monitor_enabled", True):
+                    self.logger.debug("[DEBUG] 監視無効 → 60秒待機")
+                    time.sleep(60)
+                    continue
+                
+                ncv_path = config.get("ncv_folder_path", "")
+                if not os.path.exists(ncv_path):
+                    self.logger.warning(f"NCVフォルダが存在しません: {ncv_path}")
+                    time.sleep(60)
+                    continue
+                
+                self.logger.debug(f"[DEBUG] NCVフォルダスキャン開始: {ncv_path}")
+                
+                # 新規XMLファイルを検索
+                self._scan_for_new_xmls(ncv_path)
+                
+                self.logger.debug(f"[DEBUG] 現在監視中XML数: {len(self.monitored_xmls)}")
+                
+                # ★ 監視中XMLの詳細を出力
+                for xml_path, info in self.monitored_xmls.items():
+                    self.logger.debug(f"[DEBUG] 監視中: {info['lv_value']} - {xml_path}")
+                
+                # 既存の監視中XMLをチェック
+                self._check_monitored_xmls()
+                
+                self.logger.debug("[DEBUG] 次回スキャンまで10秒待機")
+                time.sleep(10)
+                
+            except Exception as e:
+                self.logger.error(f"監視ループエラー: {str(e)}")
+                time.sleep(60)
     
     def _start_xml_monitoring(self, xml_path, subfolder_name):
         """XMLファイルの監視を開始"""

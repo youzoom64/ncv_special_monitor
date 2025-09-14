@@ -156,6 +156,10 @@ def generate_openai_analysis(user_data, config):
             print("OpenAI APIキーが設定されていません")
             return generate_basic_analysis(user_data['comments'])
         
+        # 放送情報を取得
+        broadcast_info = config.get('broadcast_info', {})
+        live_title = broadcast_info.get('live_title', '配信タイトル不明')
+        
         # コメントデータを整理
         comment_texts = []
         for comment in user_data['comments']:
@@ -178,6 +182,12 @@ def generate_openai_analysis(user_data, config):
             analysis_prompt = special_users_config.get("default_analysis_prompt", "")
             print(f"デフォルトプロンプト使用: {user_id}")
         
+        # ★★★ 重要：変数置換を実行 ★★★
+        analysis_prompt = analysis_prompt.format(
+            user=user_data['user_name'],
+            lv_title=live_title
+        )
+        
         system_prompt = "あなたは配信コメントの分析専門家です。ユーザーの行動パターンや特徴を詳しく分析してください。"
         
         full_prompt = f"""
@@ -190,7 +200,7 @@ def generate_openai_analysis(user_data, config):
 コメント履歴:
 {user_data_text}
 
-上記のデータを基に、このユーザーの詳細な分析を日本語で行ってください。
+上記のデータを基に、このユーザーの詳細な分析を行ってください。
 分析結果はHTML形式で出力し、<br>タグで改行してください。
 """
 
@@ -212,19 +222,7 @@ def generate_openai_analysis(user_data, config):
         # プロンプトと結果をファイルに保存
         save_prompt_to_file("openai", user_data, system_prompt, full_prompt, ai_result)
         
-        # 分析結果にメタ情報を追加
-        prompt_type = "個別プロンプト" if (user_id in users_config and users_config[user_id].get("analysis_prompt")) else "デフォルトプロンプト"
-        metadata = f"""
-<div style="background-color: #f0f8ff; padding: 10px; margin: 10px 0; border-left: 4px solid #0066cc;">
-<strong>AI分析情報</strong><br>
-分析モデル: OpenAI GPT-4o<br>
-プロンプト: {prompt_type}<br>
-分析日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br>
-分析対象: {len(user_data['comments'])}件のコメント
-</div>
-"""
-        
-        return metadata + ai_result
+        return ai_result
         
     except Exception as e:
         print(f"OpenAI分析エラー: {str(e)}")
@@ -247,6 +245,10 @@ def generate_gemini_analysis(user_data, config):
         genai.configure(api_key=google_api_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
+        # 放送情報を取得
+        broadcast_info = config.get('broadcast_info', {})
+        live_title = broadcast_info.get('live_title', '配信タイトル不明')
+        
         # コメントデータを整理
         comment_texts = []
         for comment in user_data['comments']:
@@ -269,6 +271,12 @@ def generate_gemini_analysis(user_data, config):
             analysis_prompt = special_users_config.get("default_analysis_prompt", "")
             print(f"デフォルトプロンプト使用: {user_id}")
         
+        # ★★★ 重要：変数置換を実行 ★★★
+        analysis_prompt = analysis_prompt.format(
+            user=user_data['user_name'],
+            lv_title=live_title
+        )
+        
         full_prompt = f"""
 {analysis_prompt}
 
@@ -288,18 +296,7 @@ def generate_gemini_analysis(user_data, config):
         # プロンプトと結果をファイルに保存
         save_prompt_to_file("gemini", user_data, "", full_prompt, response.text)
         
-        prompt_type = "個別プロンプト" if (user_id in users_config and users_config[user_id].get("analysis_prompt")) else "デフォルトプロンプト"
-        metadata = f"""
-<div style="background-color: #f0f8ff; padding: 10px; margin: 10px 0; border-left: 4px solid #0066cc;">
-<strong>AI分析情報</strong><br>
-分析モデル: Google Gemini 2.5 Flash<br>
-プロンプト: {prompt_type}<br>
-分析日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br>
-分析対象: {len(user_data['comments'])}件のコメント
-</div>
-"""
-        
-        return metadata + response.text
+        return response.text
         
     except Exception as e:
         print(f"Gemini分析エラー: {str(e)}")

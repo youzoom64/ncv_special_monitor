@@ -13,18 +13,19 @@ class PipelineExecutor:
         processors_path = os.path.join(os.path.dirname(__file__), 'processors')
         if processors_path not in sys.path:
             sys.path.append(processors_path)
-    
+            
     def execute_pipeline(self, xml_path, lv_value, subfolder_name):
         """パイプライン実行"""
         try:
             self.logger.info(f"パイプライン開始: {lv_value} ({subfolder_name})")
             
             # パイプラインデータ初期化
+            config = self.config_manager.load_config()
             pipeline_data = {
                 'xml_path': xml_path,
                 'lv_value': lv_value,
                 'subfolder_name': subfolder_name,
-                'config': self.config_manager.load_config(),
+                'config': config,
                 'start_time': datetime.now(),
                 'results': {}
             }
@@ -48,6 +49,11 @@ class PipelineExecutor:
                     if hasattr(module, 'process'):
                         result = module.process(pipeline_data)
                         pipeline_data['results'][step_name] = result
+                        
+                        # ★★★ Step01完了後に放送情報をconfigに追加 ★★★
+                        if step_name == 'step01_xml_parser' and 'broadcast_info' in result:
+                            pipeline_data['config']['broadcast_info'] = result['broadcast_info']
+                        
                         self.logger.info(f"完了: {step_name}")
                     else:
                         self.logger.warning(f"スキップ: {step_name} (process関数なし)")

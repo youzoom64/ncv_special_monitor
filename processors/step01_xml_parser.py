@@ -11,21 +11,29 @@ def process(pipeline_data):
         subfolder_name = pipeline_data['subfolder_name']
         
         print(f"Step01 開始: XMLコメント解析 - {lv_value}")
+        print(f"[DEBUG] XML file path: {xml_path}")
+        print(f"[DEBUG] File exists: {os.path.exists(xml_path)}")
         
         # XMLファイルの存在確認
         if not os.path.exists(xml_path):
             raise Exception(f"XMLファイルが見つかりません: {xml_path}")
         
         # XMLをパースしてコメントデータを抽出
+        print("[DEBUG] コメントデータ解析開始")
         comments_data = parse_ncv_xml(xml_path)
+        print(f"[DEBUG] コメントデータ解析完了: {len(comments_data)}件")
         
         # 放送情報を抽出
+        print("[DEBUG] 放送情報抽出開始")
         broadcast_info = extract_broadcast_info(xml_path)
+        print(f"[DEBUG] 放送情報抽出完了: {broadcast_info}")
         
         # 統合JSONを作成
+        print("[DEBUG] 統合JSON作成開始")
         integrated_data = create_integrated_json(lv_value, subfolder_name, broadcast_info, comments_data)
         
         # JSONファイルを保存
+        print("[DEBUG] JSONファイル保存開始")
         save_json_files(lv_value, subfolder_name, integrated_data, comments_data)
         
         print(f"Step01 完了: コメント数 {len(comments_data)}")
@@ -40,6 +48,8 @@ def process(pipeline_data):
         
     except Exception as e:
         print(f"Step01 エラー: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise
 
 def parse_ncv_xml(xml_path):
@@ -98,30 +108,43 @@ def extract_broadcast_info(xml_path):
         tree = ET.parse(xml_path)
         root = tree.getroot()
         
-        # 名前空間を考慮
-        ns = {'ncv': 'http://posite-c.jp/niconamacommentviewer/commentlog/'}
+        # 名前空間を正しく定義
+        ns = {'ns': 'http://posite-c.jp/niconamacommentviewer/commentlog/'}
         
-        # LiveInfo取得
-        live_info = root.find('.//LiveInfo', ns) or root.find('.//LiveInfo')
-        player_status = root.find('.//PlayerStatus', ns) or root.find('.//PlayerStatus')
+        # 名前空間付きで要素を検索
+        live_info = root.find('.//ns:LiveInfo', ns)
+        player_status = root.find('.//ns:PlayerStatus', ns)
+        
+        print(f"[DEBUG] LiveInfo found: {live_info is not None}")
+        print(f"[DEBUG] PlayerStatus found: {player_status is not None}")
         
         broadcast_info = {
-            'live_title': get_text_content(live_info, './/LiveTitle'),
-            'broadcaster': get_text_content(live_info, './/Broadcaster'),
-            'community_name': get_text_content(live_info, './/CommunityName'),
-            'start_time': get_text_content(live_info, './/StartTime'),
-            'end_time': get_text_content(live_info, './/EndTime'),
-            'watch_count': get_text_content(player_status, './/WatchCount'),
-            'comment_count': get_text_content(player_status, './/CommentCount'),
-            'owner_id': get_text_content(player_status, './/OwnerId'),
-            'owner_name': get_text_content(player_status, './/OwnerName')
+            'live_title': get_text_content(live_info, 'ns:LiveTitle', ns),
+            'broadcaster': get_text_content(live_info, 'ns:Broadcaster', ns),
+            'community_name': get_text_content(live_info, 'ns:CommunityName', ns),
+            'start_time': get_text_content(live_info, 'ns:StartTime', ns),
+            'end_time': get_text_content(live_info, 'ns:EndTime', ns),
+            'watch_count': get_text_content(player_status, './/ns:WatchCount', ns),
+            'comment_count': get_text_content(player_status, './/ns:CommentCount', ns),
+            'owner_id': get_text_content(player_status, './/ns:OwnerId', ns),
+            'owner_name': get_text_content(player_status, './/ns:OwnerName', ns)
         }
         
+        print(f"[DEBUG] 抽出結果: {broadcast_info}")
         return broadcast_info
         
     except Exception as e:
         print(f"放送情報抽出エラー: {str(e)}")
         return {}
+
+def get_text_content(element, xpath, ns=None):
+    """XMLから安全にテキスト取得"""
+    if element is None:
+        return ""
+    
+    found = element.find(xpath, ns) if ns else element.find(xpath)
+    result = found.text if found is not None and found.text else ""
+    return result
 
 def create_integrated_json(lv_value, subfolder_name, broadcast_info, comments_data):
     """統合JSONデータを作成"""

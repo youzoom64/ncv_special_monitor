@@ -178,6 +178,8 @@ def generate_openai_analysis(user_data, config):
             analysis_prompt = special_users_config.get("default_analysis_prompt", "")
             print(f"デフォルトプロンプト使用: {user_id}")
         
+        system_prompt = "あなたは配信コメントの分析専門家です。ユーザーの行動パターンや特徴を詳しく分析してください。"
+        
         full_prompt = f"""
 {analysis_prompt}
 
@@ -198,7 +200,7 @@ def generate_openai_analysis(user_data, config):
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "あなたは配信コメントの分析専門家です。ユーザーの行動パターンや特徴を詳しく分析してください。"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": full_prompt}
             ],
             max_tokens=1500,
@@ -206,6 +208,9 @@ def generate_openai_analysis(user_data, config):
         )
         
         ai_result = response.choices[0].message.content.strip()
+        
+        # プロンプトと結果をファイルに保存
+        save_prompt_to_file("openai", user_data, system_prompt, full_prompt, ai_result)
         
         # 分析結果にメタ情報を追加
         prompt_type = "個別プロンプト" if (user_id in users_config and users_config[user_id].get("analysis_prompt")) else "デフォルトプロンプト"
@@ -240,7 +245,7 @@ def generate_gemini_analysis(user_data, config):
         
         # Gemini APIを設定
         genai.configure(api_key=google_api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
         # コメントデータを整理
         comment_texts = []
@@ -280,11 +285,14 @@ def generate_gemini_analysis(user_data, config):
 
         response = model.generate_content(full_prompt)
         
+        # プロンプトと結果をファイルに保存
+        save_prompt_to_file("gemini", user_data, "", full_prompt, response.text)
+        
         prompt_type = "個別プロンプト" if (user_id in users_config and users_config[user_id].get("analysis_prompt")) else "デフォルトプロンプト"
         metadata = f"""
 <div style="background-color: #f0f8ff; padding: 10px; margin: 10px 0; border-left: 4px solid #0066cc;">
 <strong>AI分析情報</strong><br>
-分析モデル: Google Gemini 2.0 Flash<br>
+分析モデル: Google Gemini 2.5 Flash<br>
 プロンプト: {prompt_type}<br>
 分析日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br>
 分析対象: {len(user_data['comments'])}件のコメント
@@ -296,6 +304,57 @@ def generate_gemini_analysis(user_data, config):
     except Exception as e:
         print(f"Gemini分析エラー: {str(e)}")
         return generate_basic_analysis(user_data['comments'])
+
+def save_prompt_to_file(ai_model, user_data, system_prompt, user_prompt, ai_response):
+    """プロンプト内容と分析結果をファイルに保存"""
+    try:
+        import os
+        
+        # ログディレクトリ作成
+        log_dir = os.path.join("logs", "ai_prompts")
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # ファイル名生成
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        user_id = user_data['user_id']
+        filename = f"{timestamp}_{ai_model}_{user_id}.txt"
+        filepath = os.path.join(log_dir, filename)
+        
+        # プロンプト詳細をファイルに保存
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(f"AI分析プロンプト詳細ログ\n")
+            f.write(f"{'=' * 60}\n")
+            f.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"AIモデル: {ai_model.upper()}\n")
+            f.write(f"ユーザーID: {user_data['user_id']}\n")
+            f.write(f"ユーザー名: {user_data['user_name']}\n")
+            f.write(f"コメント数: {len(user_data['comments'])}件\n")
+            f.write(f"{'=' * 60}\n\n")
+            
+            if system_prompt:
+                f.write(f"システムプロンプト:\n")
+                f.write(f"{'-' * 30}\n")
+                f.write(f"{system_prompt}\n\n")
+            
+            f.write(f"ユーザープロンプト:\n")
+            f.write(f"{'-' * 30}\n")
+            f.write(f"{user_prompt}\n\n")
+            
+            f.write(f"AI分析結果:\n")
+            f.write(f"{'-' * 30}\n")
+            f.write(f"{ai_response}\n\n")
+            
+            f.write(f"コメント詳細:\n")
+            f.write(f"{'-' * 30}\n")
+            for i, comment in enumerate(user_data['comments'], 1):
+                timestamp = format_unix_time(comment.get('date', ''))
+                text = comment.get('text', '')
+                f.write(f"{i:3d}. [{timestamp}] {text}\n")
+        
+        print(f"プロンプトログ保存: {filepath}")
+        
+    except Exception as e:
+        print(f"プロンプトファイル保存エラー: {str(e)}")
 
 def generate_basic_analysis(comments):
     """基本分析を生成"""

@@ -1,5 +1,6 @@
 import concurrent.futures
 from datetime import datetime
+import re  # ★ 追加
 
 def process(pipeline_data):
     """Step02: スペシャルユーザー検索 + AI分析"""
@@ -143,6 +144,33 @@ def analyze_single_user(user_data, config):
         print(f"AI分析エラー ({ai_model}): {str(e)}")
         return generate_basic_analysis(comments)
 
+def clean_ai_response(ai_response):
+    """AI分析結果からコードブロック記法やMarkdown記法を除去"""
+    if not ai_response:
+        return ""
+    
+    # コードブロック記法を除去
+    ai_response = re.sub(r'```[\w]*\n?', '', ai_response)  # ```html, ```css, ``` など
+    ai_response = re.sub(r'```', '', ai_response)  # 残った```も除去
+    
+    # インラインコード記法を除去
+    ai_response = re.sub(r'`([^`]+)`', r'\1', ai_response)  # `code` → code
+    
+    # Markdown太字記法をHTMLに変換
+    ai_response = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', ai_response)
+    
+    # Markdown見出し記法をHTMLに変換
+    ai_response = re.sub(r'^### (.+)$', r'<h3>\1</h3>', ai_response, flags=re.MULTILINE)
+    ai_response = re.sub(r'^## (.+)$', r'<h2>\1</h2>', ai_response, flags=re.MULTILINE)
+    ai_response = re.sub(r'^# (.+)$', r'<h1>\1</h1>', ai_response, flags=re.MULTILINE)
+    
+    # 改行をHTMLに変換
+    ai_response = ai_response.replace('\n\n', '<br><br>')
+    ai_response = ai_response.replace('\n', '<br>')
+    
+    return ai_response.strip()
+
+
 def generate_openai_analysis(user_data, config):
     """OpenAI APIを使用してユーザー分析を生成"""
     try:
@@ -219,6 +247,9 @@ def generate_openai_analysis(user_data, config):
         
         ai_result = response.choices[0].message.content.strip()
         
+        # ★★★ 追加：AI結果をクリーニング ★★★
+        ai_result = clean_ai_response(ai_result)
+        
         # プロンプトと結果をファイルに保存
         save_prompt_to_file("openai", user_data, system_prompt, full_prompt, ai_result)
         
@@ -293,10 +324,13 @@ def generate_gemini_analysis(user_data, config):
 
         response = model.generate_content(full_prompt)
         
-        # プロンプトと結果をファイルに保存
-        save_prompt_to_file("gemini", user_data, "", full_prompt, response.text)
+        # ★★★ 追加：AI結果をクリーニング ★★★
+        ai_result = clean_ai_response(response.text)
         
-        return response.text
+        # プロンプトと結果をファイルに保存
+        save_prompt_to_file("gemini", user_data, "", full_prompt, ai_result)
+        
+        return ai_result
         
     except Exception as e:
         print(f"Gemini分析エラー: {str(e)}")

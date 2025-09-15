@@ -52,6 +52,7 @@ def save_json_files(user_data, broadcast_info, lv_value, subfolder_name):
         user_id = user_data['user_id']
         user_name = user_data['user_name']
         
+
         # JSONデータ作成
         data_json = {
             "broadcast_info": {
@@ -274,9 +275,10 @@ def generate_broadcast_item(user_data, broadcast_info, lv_value, subfolder_name)
     # コメントテーブルを生成
     comment_rows = generate_comment_rows_for_list(user_data['comments'], broadcast_info.get('start_time', ''))
     
+    # ★★★ 修正：エレガントな中央から薄くなる区切り線 ★★★
     item = f'''
         <div class="link-item">
-            <p class="separator">－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－</p>
+            <hr style="border: none; height: 1px; background: linear-gradient(to right, transparent, #333, transparent); margin: 15px 0;">
             <p class="start-time">開始時間: {format_start_time(broadcast_info.get('start_time', ''))}</p>
             <div class="comment-preview">
                 <p>初コメ: {escape_html(first_comment)}</p>
@@ -310,17 +312,27 @@ def generate_broadcast_item(user_data, broadcast_info, lv_value, subfolder_name)
                         {comment_rows}
                     </tbody>
                 </table>
+                
+                <div style="display: flex; justify-content: center; margin: 15px 0;">
+                    <button class="toggle-button" onclick="toggleDiv('{unique_id}')" 
+                            style="font-size: 16px; padding: 6px 12px; background-color: #666; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        コメントを非表示
+                    </button>
+                </div>
             </div>
             
             <p style="text-align: center; margin-top: 15px;">
-                <strong>{broadcast_info.get('live_title', 'タイトル不明')}</strong><br>
-                {user_data['user_name']}のコメント分析
+                <a href="https://live.nicovideo.jp/watch/{lv_value}" target="_blank" style="text-decoration: none; color: #007bff;">
+                    <strong>{broadcast_info.get('live_title', 'タイトル不明')}</strong>
+                </a><br>
+                <a href="{subfolder_name}_{lv_value}_detail.html" style="text-decoration: none; color: #28a745;">
+                    {user_data['user_name']}のコメント分析
+                </a>
             </p>
         </div>
     '''
     
     return item
-
 def generate_comment_rows_for_list(comments, start_time_str):
     """一覧ページ用のコメント行生成"""
     rows = []

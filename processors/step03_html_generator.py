@@ -281,8 +281,14 @@ def generate_broadcast_item(user_data, broadcast_info, lv_value, subfolder_name)
             <hr style="border: none; height: 1px; background: linear-gradient(to right, transparent, #333, transparent); margin: 15px 0;">
             <p class="start-time">開始時間: {format_start_time(broadcast_info.get('start_time', ''))}</p>
             <div class="comment-preview">
-                <p>初コメ: {escape_html(first_comment)}</p>
-                <p>最終コメ: {escape_html(last_comment)}</p>
+                <p>
+                    <span class="comment-label">初コメ:</span></br>
+                    <span class="comment-text eva-mincho">{escape_html(first_comment)}</span>
+                </p>
+                <p>
+                    <span class="comment-label">最終コメ:</span></br>
+                    <span class="comment-text eva-mincho">{escape_html(last_comment)}</span>
+                </p>
             </div>
             
             <div style="display: flex; justify-content: center; gap: 20px; margin: 10px 0;">

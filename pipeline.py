@@ -30,11 +30,12 @@ class PipelineExecutor:
                 'results': {}
             }
             
-            # ステップ定義
+            # ステップ定義（Step04を追加）
             steps = [
                 'step01_xml_parser',
                 'step02_special_user_filter',
-                'step03_html_generator'
+                'step03_html_generator',
+                'step04_database_storage'  # ★ 新規追加
             ]
             
             # 各ステップを順次実行
@@ -55,19 +56,39 @@ class PipelineExecutor:
                             pipeline_data['config']['broadcast_info'] = result['broadcast_info']
                         
                         self.logger.info(f"完了: {step_name}")
+                        
+                        # ★★★ Step04完了後にDB保存結果をログ出力 ★★★
+                        if step_name == 'step04_database_storage' and result.get('database_saved'):
+                            self.logger.info(f"DB保存完了: 放送ID={result.get('broadcast_id')}, "
+                                           f"コメント{result.get('total_comments_saved')}件, "
+                                           f"AI分析{result.get('ai_analyses_saved')}件")
                     else:
                         self.logger.warning(f"スキップ: {step_name} (process関数なし)")
                         
                 except ImportError as e:
                     self.logger.error(f"モジュール読み込みエラー: {step_name} - {str(e)}")
-                    continue
+                    # Step04のエラーは致命的ではないので続行
+                    if step_name != 'step04_database_storage':
+                        continue
+                    else:
+                        self.logger.warning("データベース保存に失敗しましたが、パイプラインを続行します")
+                        continue
                 except Exception as e:
                     self.logger.error(f"ステップ実行エラー: {step_name} - {str(e)}")
-                    continue
+                    # Step04のエラーは致命的ではないので続行
+                    if step_name != 'step04_database_storage':
+                        continue
+                    else:
+                        self.logger.warning("データベース保存に失敗しましたが、パイプラインを続行します")
+                        continue
             
             # パイプライン完了
             total_time = (datetime.now() - pipeline_data['start_time']).total_seconds()
             self.logger.info(f"パイプライン完了: {lv_value} (処理時間: {total_time:.1f}秒)")
+            
+            # パイプライン結果サマリー
+            summary = self._generate_pipeline_summary(pipeline_data['results'])
+            self.logger.info(f"パイプライン結果: {summary}")
             
             # ファイルモニターに完了通知
             if self.file_monitor:
@@ -78,3 +99,35 @@ class PipelineExecutor:
         except Exception as e:
             self.logger.error(f"パイプライン実行エラー: {lv_value} - {str(e)}")
             raise
+    
+    def _generate_pipeline_summary(self, results):
+        """パイプライン実行結果のサマリーを生成"""
+        summary_parts = []
+        
+        # Step01結果
+        if 'step01_xml_parser' in results:
+            step01 = results['step01_xml_parser']
+            summary_parts.append(f"コメント解析={step01.get('comments_count', 0)}件")
+        
+        # Step02結果  
+        if 'step02_special_user_filter' in results:
+            step02 = results['step02_special_user_filter']
+            summary_parts.append(f"特別ユーザー={step02.get('special_users_found', 0)}人")
+        
+        # Step03結果
+        if 'step03_html_generator' in results:
+            step03 = results['step03_html_generator']
+            if step03.get('html_generated'):
+                summary_parts.append(f"HTML生成={step03.get('users_processed', 0)}ユーザー")
+            else:
+                summary_parts.append("HTML生成=スキップ")
+        
+        # Step04結果
+        if 'step04_database_storage' in results:
+            step04 = results['step04_database_storage']
+            if step04.get('database_saved'):
+                summary_parts.append(f"DB保存=成功(ID:{step04.get('broadcast_id')})")
+            else:
+                summary_parts.append("DB保存=失敗")
+        
+        return ", ".join(summary_parts) if summary_parts else "結果なし"

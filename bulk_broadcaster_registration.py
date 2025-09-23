@@ -8,6 +8,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
 
+# メインアプリからログ出力するための関数をインポート
+def log_to_gui(message):
+    """ログ出力のためのダミー関数（main.pyから上書きされる）"""
+    print(message)
+
 from config_manager import HierarchicalConfigManager
 from specialuser_follow_fetcher import (
     setup_driver, fetch_follow_list, should_skip_user_id,
@@ -276,7 +281,7 @@ class BulkRegistrationDialog:
             self.update_progress(f"ファイル読み込み完了: {len(self.follows_data)}人")
 
         except Exception as e:
-            messagebox.showerror("エラー", f"ファイル読み込みエラー: {str(e)}")
+            log_to_gui(f"ファイル読み込みエラー: {str(e)}")
 
     def refresh_follows_list(self):
         """フォロー一覧を更新"""
@@ -364,13 +369,10 @@ class BulkRegistrationDialog:
         selected_follows = self.get_selected_follows()
 
         if not selected_follows:
-            messagebox.showwarning("警告", "登録する配信者を選択してください")
+            log_to_gui("登録する配信者を選択してください")
             return
 
-        result = messagebox.askyesno("確認",
-                                   f"{len(selected_follows)}人の配信者を登録しますか？")
-        if not result:
-            return
+        # 確認なしで登録
 
         try:
             self.update_progress("配信者を登録中...")
@@ -381,13 +383,13 @@ class BulkRegistrationDialog:
             )
 
             self.update_progress(f"登録完了: {registered_count}人")
-            messagebox.showinfo("完了", f"{registered_count}人の配信者を登録しました")
+            log_to_gui(f"{registered_count}人の配信者を登録しました")
 
             # 一覧を更新
             self.refresh_follows_list()
 
         except Exception as e:
-            messagebox.showerror("エラー", f"登録エラー: {str(e)}")
+            log_to_gui(f"登録エラー: {str(e)}")
 
     def close_dialog(self):
         self.result = True

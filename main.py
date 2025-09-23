@@ -13,13 +13,30 @@ from logger import NCVSpecialLogger
 from file_monitor import NCVFolderMonitor
 from broadcast_detector import BroadcastEndDetector
 from pipeline import PipelineExecutor
+import bulk_broadcaster_registration
 from bulk_broadcaster_registration import show_bulk_registration_dialog
+
+# グローバル変数：メインアプリのインスタンス
+main_app_instance = None
+
+def log_to_gui(message):
+    """GUIログエリアにメッセージを出力するグローバル関数"""
+    if main_app_instance:
+        main_app_instance.log_message(message)
+    else:
+        print(message)  # フォールバック
 
 class NCVSpecialMonitorGUI:
     def __init__(self, root):
+        global main_app_instance
+        main_app_instance = self
+
         self.root = root
         self.root.title("NCV Special User Monitor v4")
-        self.root.geometry("900x700")
+        self.root.geometry("1000x600")
+
+        # bulk_broadcaster_registrationのlog_to_gui関数を上書き
+        bulk_broadcaster_registration.log_to_gui = log_to_gui
 
         # コンポーネント初期化
         self.config_manager = HierarchicalConfigManager()
@@ -36,34 +53,45 @@ class NCVSpecialMonitorGUI:
         self.root.after(1000, self.update_log_display)
 
     def update_log_display(self):
-        """ログ表示を定期更新"""
+        """ログ表示を定期更新（無効化済み - GUIログメッセージが上書きされるのを防ぐ）"""
+        # 古いログシステムによる上書きを無効化
+        # GUIログメッセージはlog_message()メソッドで直接出力される
+        self.root.after(5000, self.update_log_display)
+
+    def log_message(self, message):
+        """GUIログエリアにメッセージを出力"""
         try:
-            recent_logs = self.logger.get_recent_logs(20)
-            self.log_text.delete(1.0, tk.END)
-            self.log_text.insert(tk.END, recent_logs)
+            self.log_text.insert(tk.END, f"{message}\n")
             self.log_text.see(tk.END)
         except Exception:
             pass
-        self.root.after(5000, self.update_log_display)
 
     def setup_gui(self):
         """GUI設定"""
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
+        # 左側のフレーム（設定系）
+        left_frame = ttk.Frame(main_frame)
+        left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
+
+        # 右側のフレーム（一覧・ログ）
+        right_frame = ttk.Frame(main_frame)
+        right_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
+
         # NCVフォルダ設定
-        ncv_frame = ttk.LabelFrame(main_frame, text="NCVフォルダ設定", padding="5")
-        ncv_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        ncv_frame = ttk.LabelFrame(left_frame, text="NCVフォルダ設定", padding="5")
+        ncv_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
 
         ttk.Label(ncv_frame, text="NCVフォルダパス:").grid(row=0, column=0, sticky=tk.W)
         self.ncv_path_var = tk.StringVar()
-        self.ncv_path_entry = ttk.Entry(ncv_frame, textvariable=self.ncv_path_var, width=60)
-        self.ncv_path_entry.grid(row=0, column=1, padx=(5, 5))
+        self.ncv_path_entry = ttk.Entry(ncv_frame, textvariable=self.ncv_path_var, width=40)
+        self.ncv_path_entry.grid(row=0, column=1, padx=(5, 5), sticky=(tk.W, tk.E))
         ttk.Button(ncv_frame, text="参照", command=self.browse_ncv_folder).grid(row=0, column=2)
 
         # 監視設定
-        monitor_frame = ttk.LabelFrame(main_frame, text="監視設定", padding="5")
-        monitor_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        monitor_frame = ttk.LabelFrame(left_frame, text="監視設定", padding="5")
+        monitor_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
 
         self.monitor_enabled_var = tk.BooleanVar()
         ttk.Checkbutton(monitor_frame, text="監視を有効化", variable=self.monitor_enabled_var).grid(row=0, column=0, sticky=tk.W)
@@ -73,8 +101,8 @@ class NCVSpecialMonitorGUI:
         ttk.Entry(monitor_frame, textvariable=self.check_interval_var, width=10).grid(row=1, column=1, sticky=tk.W, padx=(5, 0))
 
         # API設定
-        api_frame = ttk.LabelFrame(main_frame, text="API設定", padding="5")
-        api_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        api_frame = ttk.LabelFrame(left_frame, text="API設定", padding="5")
+        api_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
 
         # 分析用AI設定
         ttk.Label(api_frame, text="AI分析モデル:").grid(row=0, column=0, sticky=tk.W)
@@ -113,15 +141,15 @@ class NCVSpecialMonitorGUI:
         ttk.Entry(response_settings_frame, textvariable=self.split_delay_var, width=10).grid(row=0, column=3, padx=(5, 0))
 
         # スペシャルユーザー設定
-        users_frame = ttk.LabelFrame(main_frame, text="スペシャルユーザー設定", padding="5")
-        users_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        users_frame = ttk.LabelFrame(right_frame, text="スペシャルユーザー設定", padding="5")
+        users_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
 
         # ユーザー一覧
         self.users_tree = ttk.Treeview(
             users_frame,
             columns=("user_id", "display_name", "ai_model", "broadcasters", "special_triggers"),
             show="headings",
-            height=8
+            height=12
         )
         self.users_tree.heading("user_id", text="ユーザーID")
         self.users_tree.heading("display_name", text="表示名")
@@ -152,8 +180,8 @@ class NCVSpecialMonitorGUI:
         ttk.Button(buttons_frame, text="配信者管理", command=self.manage_broadcasters).grid(row=0, column=3, padx=(5, 0))
 
         # 制御ボタン
-        control_frame = ttk.Frame(main_frame)
-        control_frame.grid(row=4, column=0, columnspan=2, pady=(10, 0))
+        control_frame = ttk.Frame(left_frame)
+        control_frame.grid(row=4, column=0, pady=(5, 0))
 
         self.start_button = ttk.Button(control_frame, text="監視開始", command=self.start_monitoring)
         self.start_button.grid(row=0, column=0, padx=(0, 5))
@@ -164,11 +192,11 @@ class NCVSpecialMonitorGUI:
         ttk.Button(control_frame, text="設定保存", command=self.save_config).grid(row=0, column=2, padx=(5, 0))
 
         # ログ
-        log_frame = ttk.LabelFrame(main_frame, text="ログ", padding="5")
-        log_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10, 0))
+        log_frame = ttk.LabelFrame(right_frame, text="ログ", padding="5")
+        log_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
 
-        self.log_text = tk.Text(log_frame, height=10)
-        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.log_text = tk.Text(log_frame, height=8)
+        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E))
         log_scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
         log_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         self.log_text.configure(yscrollcommand=log_scrollbar.set)
@@ -176,14 +204,27 @@ class NCVSpecialMonitorGUI:
         # グリッド設定
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(3, weight=1)
-        main_frame.rowconfigure(5, weight=1)
+
+        # メインフレーム - 左右分割
+        main_frame.columnconfigure(0, weight=0)  # 左側（設定）は固定幅
+        main_frame.columnconfigure(1, weight=1)  # 右側（一覧・ログ）は伸縮
+        main_frame.rowconfigure(0, weight=1)
+
+        # 左側フレーム
+        left_frame.columnconfigure(0, weight=1)
+
+        # 右側フレーム
+        right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(0, weight=1)  # ユーザー一覧だけが伸縮
+        right_frame.rowconfigure(1, weight=0)  # ログは固定サイズ
+
+        # 個別フレーム
         users_frame.columnconfigure(0, weight=1)
         users_frame.rowconfigure(0, weight=1)
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
+        log_frame.columnconfigure(0, weight=1)  # 横幅だけ伸縮
+        # log_frame.rowconfigure(0, weight=1) を削除 - 縦は固定
         api_frame.columnconfigure(1, weight=1)
+        ncv_frame.columnconfigure(1, weight=1)
 
     def browse_ncv_folder(self):
         folder = filedialog.askdirectory()
@@ -251,7 +292,7 @@ class NCVSpecialMonitorGUI:
         """ユーザー編集"""
         selected = self.users_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "編集するユーザーを選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         values = self.users_tree.item(selected[0], "values")
@@ -266,23 +307,22 @@ class NCVSpecialMonitorGUI:
         """ユーザー削除"""
         selected = self.users_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "削除するユーザーを選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         values = self.users_tree.item(selected[0], "values")
         user_id = values[0]
         display_name = values[1]
 
-        result = messagebox.askyesno("確認", f"ユーザー「{display_name}」を削除しますか？")
-        if result:
-            self.config_manager.delete_user_config(user_id)
-            self.refresh_users_list()
+        # 確認なしで削除
+        self.config_manager.delete_user_config(user_id)
+        self.refresh_users_list()
 
     def manage_broadcasters(self):
         """配信者管理"""
         selected = self.users_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "管理するユーザーを選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         values = self.users_tree.item(selected[0], "values")
@@ -319,22 +359,44 @@ class NCVSpecialMonitorGUI:
             config["api_settings"] = api_settings
 
             self.config_manager.save_global_config(config)
-            messagebox.showinfo("成功", "設定を保存しました")
+            # 設定保存の詳細ログ
+            special_users = self.config_manager.get_all_special_users()
+            user_count = len(special_users)
+            self.log_message(f"設定を保存しました - スペシャルユーザー: {user_count}人, NCVフォルダ: {self.ncv_path_var.get()}")
 
         except Exception as e:
-            messagebox.showerror("エラー", f"設定保存エラー: {str(e)}")
+            self.log_message(f"設定保存エラー: {str(e)}")
 
     def start_monitoring(self):
         """監視開始"""
         try:
             self.save_config()
+
+            # 登録ユーザー情報を取得
+            special_users = self.config_manager.get_all_special_users()
+            user_count = len(special_users)
+
+            if user_count == 0:
+                self.log_message("監視を開始しましたが、スペシャルユーザーが登録されていません")
+            else:
+                # ユーザー名一覧を作成
+                user_names = []
+                for user_id, user_config in special_users.items():
+                    display_name = user_config.get("display_name", f"ユーザー{user_id}")
+                    user_names.append(display_name)
+
+                user_list = ", ".join(user_names[:3])  # 最大3人まで表示
+                if user_count > 3:
+                    user_list += f" 他{user_count - 3}人"
+
+                self.log_message(f"監視を開始しました - 対象: {user_list} (計{user_count}人)")
+
             self.file_monitor.start_monitoring()
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
-            self.log_text.insert(tk.END, "監視を開始しました\n")
-            self.log_text.see(tk.END)
+
         except Exception as e:
-            messagebox.showerror("エラー", f"監視開始エラー: {str(e)}")
+            self.log_message(f"監視開始エラー: {str(e)}")
 
     def stop_monitoring(self):
         """監視停止"""
@@ -343,10 +405,14 @@ class NCVSpecialMonitorGUI:
             self.broadcast_detector.stop_all_detections()
             self.start_button.config(state=tk.NORMAL)
             self.stop_button.config(state=tk.DISABLED)
-            self.log_text.insert(tk.END, "監視を停止しました\n")
-            self.log_text.see(tk.END)
+
+            # 停止時刻を含めて詳細ログ
+            from datetime import datetime
+            stop_time = datetime.now().strftime("%H:%M:%S")
+            self.log_message(f"監視を停止しました ({stop_time})")
+
         except Exception as e:
-            messagebox.showerror("エラー", f"監視停止エラー: {str(e)}")
+            self.log_message(f"監視停止エラー: {str(e)}")
 
 
 class UserEditDialog:
@@ -454,7 +520,7 @@ class UserEditDialog:
         """ユーザー名取得"""
         user_id = self.user_id_var.get().strip()
         if not user_id:
-            messagebox.showwarning("警告", "ユーザーIDを入力してください")
+            self.log_message("ユーザーIDを入力してください")
             return
 
         try:
@@ -472,20 +538,20 @@ class UserEditDialog:
 
             if nickname:
                 self.display_name_var.set(nickname)
-                messagebox.showinfo("成功", f"ユーザー名を取得しました: {nickname}")
+                self.log_message(f"ユーザー名を取得しました: {nickname}")
             else:
                 self.display_name_var.set(f"ユーザー{user_id}")
-                messagebox.showwarning("警告", "ユーザー名を取得できませんでした")
+                self.log_message("ユーザー名を取得できませんでした")
 
         except Exception as e:
             self.display_name_var.set(f"ユーザー{user_id}")
-            messagebox.showerror("エラー", f"ユーザー情報の取得に失敗しました: {str(e)}")
+            self.log_message(f"ユーザー情報の取得に失敗しました: {str(e)}")
 
     def manage_special_triggers(self):
         """スペシャルトリガー管理"""
         user_id = self.user_id_var.get().strip()
         if not user_id:
-            messagebox.showwarning("警告", "ユーザーIDを入力してください")
+            self.log_message("ユーザーIDを入力してください")
             return
 
         dialog = SpecialTriggerManagementDialog(self.dialog, self.config_manager, user_id)
@@ -497,7 +563,7 @@ class UserEditDialog:
         display_name = self.display_name_var.get().strip()
 
         if not user_id:
-            messagebox.showerror("エラー", "ユーザーIDを入力してください")
+            self.log_message("ユーザーIDを入力してください")
             return
         if not display_name:
             display_name = f"ユーザー{user_id}"
@@ -593,6 +659,8 @@ class BroadcasterManagementDialog:
 
         ttk.Button(button_frame, text="配信者追加", command=self.add_broadcaster).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(button_frame, text="一括登録", command=self.bulk_register_broadcasters).pack(side=tk.LEFT, padx=(5, 5))
+        ttk.Button(button_frame, text="一括有効", command=self.enable_all_broadcasters).pack(side=tk.LEFT, padx=(5, 5))
+        ttk.Button(button_frame, text="一括無効", command=self.disable_all_broadcasters).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="配信者編集", command=self.edit_broadcaster).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="配信者削除", command=self.delete_broadcaster).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="トリガー管理", command=self.manage_triggers).pack(side=tk.LEFT, padx=(5, 5))
@@ -663,9 +731,48 @@ class BroadcasterManagementDialog:
                 self.config_manager.save_broadcaster_config(self.user_id, broadcaster_id, broadcaster_config)
 
                 status_text = "有効" if enabled else "無効"
-                print(f"配信者 {broadcaster_id} を{status_text}に変更しました")
+                log_to_gui(f"配信者 {broadcaster_id} を{status_text}に変更しました")
         except Exception as e:
             messagebox.showerror("エラー", f"設定更新エラー: {str(e)}")
+
+    def enable_all_broadcasters(self):
+        """全配信者を一括有効化"""
+        try:
+            broadcasters = self.config_manager.get_user_broadcasters(self.user_id)
+            updated_count = 0
+
+            for broadcaster_id, broadcaster_config in broadcasters.items():
+                if not broadcaster_config.get("enabled", True):
+                    broadcaster_config["enabled"] = True
+                    self.config_manager.save_broadcaster_config(self.user_id, broadcaster_id, broadcaster_config)
+                    updated_count += 1
+
+            self.refresh_broadcasters_list()
+            log_to_gui(f"{updated_count}人の配信者を有効化しました")
+        except Exception as e:
+            log_to_gui(f"一括有効化エラー: {str(e)}")
+
+    def disable_all_broadcasters(self):
+        """全配信者を一括無効化"""
+        broadcasters = self.config_manager.get_user_broadcasters(self.user_id)
+        if not broadcasters:
+            log_to_gui("配信者が登録されていません")
+            return
+
+# 確認なしで一括無効化
+
+        try:
+            updated_count = 0
+            for broadcaster_id, broadcaster_config in broadcasters.items():
+                if broadcaster_config.get("enabled", True):
+                    broadcaster_config["enabled"] = False
+                    self.config_manager.save_broadcaster_config(self.user_id, broadcaster_id, broadcaster_config)
+                    updated_count += 1
+
+            self.refresh_broadcasters_list()
+            log_to_gui(f"{updated_count}人の配信者を無効化しました")
+        except Exception as e:
+            log_to_gui(f"一括無効化エラー: {str(e)}")
 
     def add_broadcaster(self):
         """配信者追加"""
@@ -678,7 +785,7 @@ class BroadcasterManagementDialog:
         """配信者編集"""
         selected = self.broadcasters_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "編集する配信者を選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         values = self.broadcasters_tree.item(selected[0], "values")
@@ -693,23 +800,22 @@ class BroadcasterManagementDialog:
         """配信者削除"""
         selected = self.broadcasters_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "削除する配信者を選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         values = self.broadcasters_tree.item(selected[0], "values")
         broadcaster_id = values[0]
         broadcaster_name = values[1]
 
-        result = messagebox.askyesno("確認", f"配信者「{broadcaster_name}」を削除しますか？")
-        if result:
-            self.config_manager.delete_broadcaster_config(self.user_id, broadcaster_id)
-            self.refresh_broadcasters_list()
+        # 確認なしで削除
+        self.config_manager.delete_broadcaster_config(self.user_id, broadcaster_id)
+        self.refresh_broadcasters_list()
 
     def manage_triggers(self):
         """トリガー管理"""
         selected = self.broadcasters_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "管理する配信者を選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         values = self.broadcasters_tree.item(selected[0], "values")
@@ -826,7 +932,7 @@ class BroadcasterEditDialog:
         broadcaster_name = self.broadcaster_name_var.get().strip()
 
         if not broadcaster_id:
-            messagebox.showerror("エラー", "配信者IDを入力してください")
+            log_to_gui("配信者IDを入力してください")
             return
         if not broadcaster_name:
             broadcaster_name = f"配信者{broadcaster_id}"
@@ -916,6 +1022,8 @@ class TriggerManagementDialog:
         button_frame.pack(fill=tk.X, pady=(10, 0))
 
         ttk.Button(button_frame, text="トリガー追加", command=self.add_trigger).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="一括有効", command=self.enable_all_triggers).pack(side=tk.LEFT, padx=(5, 5))
+        ttk.Button(button_frame, text="一括無効", command=self.disable_all_triggers).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="トリガー編集", command=self.edit_trigger).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="トリガー削除", command=self.delete_trigger).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="閉じる", command=self.close_dialog).pack(side=tk.RIGHT)
@@ -988,10 +1096,49 @@ class TriggerManagementDialog:
                     self.config_manager.save_trigger_config(self.user_id, self.broadcaster_id, trigger)
 
                     status_text = "有効" if enabled else "無効"
-                    print(f"トリガー {trigger.get('name', '')} を{status_text}に変更しました")
+                    log_to_gui(f"トリガー {trigger.get('name', '')} を{status_text}に変更しました")
                     break
         except Exception as e:
             messagebox.showerror("エラー", f"設定更新エラー: {str(e)}")
+
+    def enable_all_triggers(self):
+        """全トリガーを一括有効化"""
+        try:
+            triggers = self.config_manager.get_broadcaster_triggers(self.user_id, self.broadcaster_id)
+            updated_count = 0
+
+            for trigger in triggers:
+                if not trigger.get("enabled", True):
+                    trigger["enabled"] = True
+                    self.config_manager.save_trigger_config(self.user_id, self.broadcaster_id, trigger)
+                    updated_count += 1
+
+            self.refresh_triggers_list()
+            log_to_gui(f"{updated_count}個のトリガーを有効化しました")
+        except Exception as e:
+            log_to_gui(f"一括有効化エラー: {str(e)}")
+
+    def disable_all_triggers(self):
+        """全トリガーを一括無効化"""
+        triggers = self.config_manager.get_broadcaster_triggers(self.user_id, self.broadcaster_id)
+        if not triggers:
+            log_to_gui("トリガーが登録されていません")
+            return
+
+# 確認なしで一括無効化
+
+        try:
+            updated_count = 0
+            for trigger in triggers:
+                if trigger.get("enabled", True):
+                    trigger["enabled"] = False
+                    self.config_manager.save_trigger_config(self.user_id, self.broadcaster_id, trigger)
+                    updated_count += 1
+
+            self.refresh_triggers_list()
+            log_to_gui(f"{updated_count}個のトリガーを無効化しました")
+        except Exception as e:
+            log_to_gui(f"一括無効化エラー: {str(e)}")
 
     def add_trigger(self):
         """トリガー追加"""
@@ -1004,7 +1151,7 @@ class TriggerManagementDialog:
         """トリガー編集"""
         selected = self.triggers_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "編集するトリガーを選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         # 選択されたトリガーのインデックスを取得
@@ -1024,7 +1171,7 @@ class TriggerManagementDialog:
         """トリガー削除"""
         selected = self.triggers_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "削除するトリガーを選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         selected_index = self.triggers_tree.index(selected[0])
@@ -1035,8 +1182,8 @@ class TriggerManagementDialog:
             trigger_name = trigger.get("name", "無名トリガー")
             trigger_id = trigger.get("id")
 
-            result = messagebox.askyesno("確認", f"トリガー「{trigger_name}」を削除しますか？")
-            if result and trigger_id:
+            # 確認なしで削除
+            if trigger_id:
                 self.config_manager.delete_trigger_config(self.user_id, self.broadcaster_id, trigger_id)
                 self.refresh_triggers_list()
 
@@ -1154,14 +1301,14 @@ class TriggerEditDialog:
         trigger_name = self.trigger_name_var.get().strip()
 
         if not trigger_name:
-            messagebox.showerror("エラー", "トリガー名を入力してください")
+            log_to_gui("トリガー名を入力してください")
             return
 
         # キーワードを処理
         keywords_text = self.keywords_text.get("1.0", tk.END).strip()
         keywords = [kw.strip() for kw in keywords_text.split("\n") if kw.strip()]
         if not keywords:
-            messagebox.showerror("エラー", "キーワードを少なくとも1つ入力してください")
+            log_to_gui("キーワードを少なくとも1つ入力してください")
             return
 
         # メッセージを処理
@@ -1224,18 +1371,23 @@ class SpecialTriggerManagementDialog:
         self.triggers_tree = ttk.Treeview(
             list_frame,
             columns=("name", "enabled", "keywords", "condition"),
-            show="headings",
+            show="tree headings",
             height=8
         )
+        self.triggers_tree.heading("#0", text="選択")
         self.triggers_tree.heading("name", text="名前")
-        self.triggers_tree.heading("enabled", text="有効")
+        self.triggers_tree.heading("enabled", text="状態")
         self.triggers_tree.heading("keywords", text="キーワード")
         self.triggers_tree.heading("condition", text="条件")
 
+        self.triggers_tree.column("#0", width=60)
         self.triggers_tree.column("name", width=150)
         self.triggers_tree.column("enabled", width=60)
         self.triggers_tree.column("keywords", width=300)
         self.triggers_tree.column("condition", width=60)
+
+        # チェックボックスクリック処理をバインド
+        self.triggers_tree.bind("<Button-1>", self.on_trigger_click)
 
         self.triggers_tree.pack(fill=tk.BOTH, expand=True)
 
@@ -1244,6 +1396,8 @@ class SpecialTriggerManagementDialog:
         button_frame.pack(fill=tk.X, pady=(10, 0))
 
         ttk.Button(button_frame, text="追加", command=self.add_trigger).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="一括有効", command=self.enable_all_triggers).pack(side=tk.LEFT, padx=(5, 5))
+        ttk.Button(button_frame, text="一括無効", command=self.disable_all_triggers).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="編集", command=self.edit_trigger).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="削除", command=self.delete_trigger).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="閉じる", command=self.close_dialog).pack(side=tk.RIGHT)
@@ -1256,14 +1410,19 @@ class SpecialTriggerManagementDialog:
         triggers = self.config_manager.get_user_special_triggers(self.user_id)
         for trigger in triggers:
             name = trigger.get("name", "無名トリガー")
-            enabled = "✓" if trigger.get("enabled", True) else "✗"
+            enabled = trigger.get("enabled", True)
             keywords = ", ".join(trigger.get("keywords", []))
             condition = trigger.get("keyword_condition", "OR")
+
+            # チェックボックス表示
+            checkbox = "☑" if enabled else "☐"
+            status = "有効" if enabled else "無効"
 
             self.triggers_tree.insert(
                 "",
                 tk.END,
-                values=(name, enabled, keywords, condition)
+                text=checkbox,
+                values=(name, status, keywords, condition)
             )
 
     def add_trigger(self):
@@ -1277,7 +1436,7 @@ class SpecialTriggerManagementDialog:
         """トリガー編集"""
         selected = self.triggers_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "編集するトリガーを選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         selected_index = self.triggers_tree.index(selected[0])
@@ -1296,7 +1455,7 @@ class SpecialTriggerManagementDialog:
         """トリガー削除"""
         selected = self.triggers_tree.selection()
         if not selected:
-            messagebox.showwarning("警告", "削除するトリガーを選択してください")
+            self.log_message("編集するユーザーを選択してください")
             return
 
         selected_index = self.triggers_tree.index(selected[0])
@@ -1307,10 +1466,98 @@ class SpecialTriggerManagementDialog:
             trigger_name = trigger.get("name", "無名トリガー")
             trigger_id = trigger.get("id")
 
-            result = messagebox.askyesno("確認", f"スペシャルトリガー「{trigger_name}」を削除しますか？")
-            if result and trigger_id:
+            # 確認なしで削除
+            if trigger_id:
                 self.config_manager.delete_special_trigger_config(self.user_id, trigger_id)
                 self.refresh_triggers_list()
+
+    def on_trigger_click(self, event):
+        """スペシャルトリガーのチェックボックスクリック処理"""
+        item = self.triggers_tree.identify('item', event.x, event.y)
+        column = self.triggers_tree.identify('column', event.x, event.y)
+
+        # チェックボックス列（#0）がクリックされた場合
+        if item and column == "#0":
+            # 選択されたトリガーのインデックスを取得
+            selected_index = self.triggers_tree.index(item)
+            triggers = self.config_manager.get_user_special_triggers(self.user_id)
+
+            if selected_index < len(triggers):
+                trigger = triggers[selected_index]
+                trigger_id = trigger.get("id")
+
+                if trigger_id:
+                    # 現在の状態を取得
+                    current_text = self.triggers_tree.item(item, "text")
+                    current_enabled = current_text == "☑"
+
+                    # 状態を切り替え
+                    new_enabled = not current_enabled
+                    new_checkbox = "☑" if new_enabled else "☐"
+                    new_status = "有効" if new_enabled else "無効"
+
+                    # 表示を更新
+                    self.triggers_tree.item(item, text=new_checkbox)
+                    values = list(self.triggers_tree.item(item, "values"))
+                    values[1] = new_status  # 状態列を更新
+                    self.triggers_tree.item(item, values=values)
+
+                    # 設定を保存
+                    self.update_special_trigger_enabled_status(trigger_id, new_enabled)
+
+    def update_special_trigger_enabled_status(self, trigger_id: str, enabled: bool):
+        """スペシャルトリガーの有効/無効状態を更新"""
+        try:
+            triggers = self.config_manager.get_user_special_triggers(self.user_id)
+            for trigger in triggers:
+                if trigger.get("id") == trigger_id:
+                    trigger["enabled"] = enabled
+                    self.config_manager.save_special_trigger_config(self.user_id, trigger)
+
+                    status_text = "有効" if enabled else "無効"
+                    log_to_gui(f"スペシャルトリガー {trigger.get('name', '')} を{status_text}に変更しました")
+                    break
+        except Exception as e:
+            messagebox.showerror("エラー", f"設定更新エラー: {str(e)}")
+
+    def enable_all_triggers(self):
+        """全スペシャルトリガーを一括有効化"""
+        try:
+            triggers = self.config_manager.get_user_special_triggers(self.user_id)
+            updated_count = 0
+
+            for trigger in triggers:
+                if not trigger.get("enabled", True):
+                    trigger["enabled"] = True
+                    self.config_manager.save_special_trigger_config(self.user_id, trigger)
+                    updated_count += 1
+
+            self.refresh_triggers_list()
+            log_to_gui(f"{updated_count}個のスペシャルトリガーを有効化しました")
+        except Exception as e:
+            log_to_gui(f"一括有効化エラー: {str(e)}")
+
+    def disable_all_triggers(self):
+        """全スペシャルトリガーを一括無効化"""
+        triggers = self.config_manager.get_user_special_triggers(self.user_id)
+        if not triggers:
+            log_to_gui("トリガーが登録されていません")
+            return
+
+# 確認なしで一括無効化
+
+        try:
+            updated_count = 0
+            for trigger in triggers:
+                if trigger.get("enabled", True):
+                    trigger["enabled"] = False
+                    self.config_manager.save_special_trigger_config(self.user_id, trigger)
+                    updated_count += 1
+
+            self.refresh_triggers_list()
+            log_to_gui(f"{updated_count}個のスペシャルトリガーを無効化しました")
+        except Exception as e:
+            log_to_gui(f"一括無効化エラー: {str(e)}")
 
     def close_dialog(self):
         self.result = True
@@ -1425,14 +1672,14 @@ class SpecialTriggerEditDialog:
         trigger_name = self.trigger_name_var.get().strip()
 
         if not trigger_name:
-            messagebox.showerror("エラー", "トリガー名を入力してください")
+            log_to_gui("トリガー名を入力してください")
             return
 
         # キーワードを処理
         keywords_text = self.keywords_text.get("1.0", tk.END).strip()
         keywords = [kw.strip() for kw in keywords_text.split("\n") if kw.strip()]
         if not keywords:
-            messagebox.showerror("エラー", "キーワードを少なくとも1つ入力してください")
+            log_to_gui("キーワードを少なくとも1つ入力してください")
             return
 
         # メッセージを処理

@@ -47,14 +47,10 @@ def process(pipeline_data):
         raise
 
 def get_special_users_from_config(config):
-    """設定からスペシャルユーザーリストを取得"""
-    special_users_config = config.get("special_users_config", {})
-    users = special_users_config.get("users", {})
-    
-    user_ids = list(users.keys())
-    print(f"設定済みスペシャルユーザー: {user_ids}")
-    
-    return user_ids
+    """個別設定から全スペシャルユーザーを取得"""
+    from config_manager import IndividualConfigManager
+    config_manager = IndividualConfigManager()
+    return config_manager.get_special_users_list()
 
 def find_special_users_in_comments(comments_data, special_users):
     """コメントからスペシャルユーザーを検索"""
@@ -118,55 +114,83 @@ def perform_ai_analysis_parallel(found_users_data, config):
     
     return analyzed_users
 
+# === 置換: analyze_single_user（個別設定優先） ===
 def analyze_single_user(user_data, config):
-    """単一ユーザーのAI分析を実行"""
+    """個別設定（IndividualConfigManager）を優先してAI分析を実行"""
+    from config_manager import IndividualConfigManager
+
     user_id = user_data['user_id']
-    comments = user_data['comments']
-    
+    user_name = user_data.get('user_name', '')
+    comments = user_data.get('comments', [])
+
     if not comments:
         return {
             'analysis_result': "分析対象のコメントがありません。",
             'model_used': 'none',
             'prompt_used': ''
         }
-    
-    # special_users_configからAI設定を取得
-    special_users_config = config.get("special_users_config", {})
-    users_config = special_users_config.get("users", {})
-    
-    # 個別ユーザー設定があるかチェック
-    if user_id in users_config:
-        user_specific_config = users_config[user_id]
-        ai_model = user_specific_config.get("analysis_ai_model", special_users_config.get("default_analysis_ai_model", "openai-gpt4o"))
-        analysis_enabled = user_specific_config.get("analysis_enabled", special_users_config.get("default_analysis_enabled", True))
+
+    cfg = IndividualConfigManager()
+    user_cfg = cfg.load_user_config(user_id, user_name) or {}
+    global_cfg = cfg.load_global_config() or {}
+
+    ai_settings = user_cfg.get("ai_analysis", {}) or {}
+
+    # 有効・モデル決定（個別 > グローバル > 旧config > デフォルト）
+    analysis_enabled = ai_settings.get("enabled", True)
+    ai_model = (
+        ai_settings.get("model")
+        or ai_settings.get("analysis_ai_model")
+        or global_cfg.get("default_analysis_model")
+        or config.get("special_users_config", {}).get("default_analysis_ai_model")
+        or "openai-gpt4o"
+    )
+
+    # プロンプト決定（個別 > グローバル > 旧config）
+    if ai_settings.get("use_default_prompt", True):
+        prompt_template = (
+            global_cfg.get("default_analysis_prompt")
+            or config.get("special_users_config", {}).get("default_analysis_prompt", "")
+        )
     else:
-        ai_model = special_users_config.get("default_analysis_ai_model", "openai-gpt4o")
-        analysis_enabled = special_users_config.get("default_analysis_enabled", True)
-    
+        prompt_template = ai_settings.get("custom_prompt", "") or ""
+
+    # 変数注入込みの最終プロンプトを構築
+    full_prompt = build_analysis_prompt(user_data, config, prompt_template)
+
     print(f"AI分析設定 - モデル: {ai_model}, 有効: {analysis_enabled}")
-    
+
     if not analysis_enabled:
         return {
             'analysis_result': generate_basic_analysis(comments),
             'model_used': 'basic',
             'prompt_used': 'basic_analysis'
         }
-    
+
     try:
         if ai_model == "openai-gpt4o":
-            analysis_result, prompt_used = generate_openai_analysis(user_data, config)
+            analysis_result, used_prompt = generate_openai_analysis_with_prompt(
+                user_data, config, full_prompt,
+                system_prompt="あなたは配信コメントの分析専門家です。ユーザーの行動パターンや特徴を詳しく分析してください。",
+                model_name="gpt-4o"
+            )
             return {
                 'analysis_result': analysis_result,
                 'model_used': 'openai-gpt4o',
-                'prompt_used': prompt_used
+                'prompt_used': used_prompt
             }
+
         elif ai_model == "google-gemini-2.5-flash":
-            analysis_result, prompt_used = generate_gemini_analysis(user_data, config)
+            analysis_result, used_prompt = generate_gemini_analysis_with_prompt(
+                user_data, config, full_prompt,
+                model_name="gemini-2.5-flash"
+            )
             return {
                 'analysis_result': analysis_result,
                 'model_used': 'google-gemini-2.5-flash',
-                'prompt_used': prompt_used
+                'prompt_used': used_prompt
             }
+
         else:
             print(f"不明なAIモデル: {ai_model}")
             return {
@@ -174,6 +198,7 @@ def analyze_single_user(user_data, config):
                 'model_used': 'basic',
                 'prompt_used': 'basic_analysis'
             }
+
     except Exception as e:
         print(f"AI分析エラー ({ai_model}): {str(e)}")
         return {
@@ -181,6 +206,113 @@ def analyze_single_user(user_data, config):
             'model_used': 'basic_fallback',
             'prompt_used': 'error_fallback'
         }
+
+# === 追加: 明示プロンプト指定の実行関数（OpenAI / Gemini） ===
+def generate_openai_analysis_with_prompt(user_data, config, full_prompt: str, system_prompt: str, model_name: str = "gpt-4o"):
+    """OpenAIをプロンプト直指定で実行し、クリーン済みHTMLを返す"""
+    try:
+        import openai
+        api_settings = config.get("api_settings", {}) if isinstance(config, dict) else {}
+        openai_api_key = api_settings.get("openai_api_key", "")
+
+        if not openai_api_key:
+            print("OpenAI APIキーが設定されていません")
+            return generate_basic_analysis(user_data.get('comments', [])), "no_api_key"
+
+        client = openai.OpenAI(api_key=openai_api_key)
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": full_prompt}
+            ],
+            max_tokens=1500,
+            temperature=0.7
+        )
+        ai_result = response.choices[0].message.content.strip()
+        ai_result = clean_ai_response(ai_result)
+
+        # ログ保存
+        save_prompt_to_file("openai", user_data, system_prompt, full_prompt, ai_result)
+
+        return ai_result, full_prompt
+
+    except Exception as e:
+        print(f"OpenAI分析エラー: {str(e)}")
+        return generate_basic_analysis(user_data.get('comments', [])), f"error: {str(e)}"
+
+
+def generate_gemini_analysis_with_prompt(user_data, config, full_prompt: str, model_name: str = "gemini-2.5-flash"):
+    """Geminiをプロンプト直指定で実行し、クリーン済みHTMLを返す"""
+    try:
+        import google.generativeai as genai
+        api_settings = config.get("api_settings", {}) if isinstance(config, dict) else {}
+        google_api_key = api_settings.get("google_api_key", "")
+
+        if not google_api_key:
+            print("Google APIキーが設定されていません")
+            return generate_basic_analysis(user_data.get('comments', [])), "no_api_key"
+
+        genai.configure(api_key=google_api_key)
+        model = genai.GenerativeModel(model_name)
+
+        response = model.generate_content(full_prompt)
+        ai_result = clean_ai_response(response.text)
+
+        # ログ保存（system_promptはないので空で保存）
+        save_prompt_to_file("gemini", user_data, "", full_prompt, ai_result)
+
+        return ai_result, full_prompt
+
+    except Exception as e:
+        print(f"Gemini分析エラー: {str(e)}")
+        return generate_basic_analysis(user_data.get('comments', [])), f"error: {str(e)}"
+
+
+
+
+# === 追加: プロンプト構築ヘルパー ===
+def build_analysis_prompt(user_data, config, prompt_template: str) -> str:
+    """分析用の最終プロンプトを構築（変数埋め込み＋日本語HTML改行）"""
+    # 放送情報
+    broadcast_info = config.get('broadcast_info', {}) if isinstance(config, dict) else {}
+    live_title = broadcast_info.get('live_title', '配信タイトル不明')
+
+    # コメント整形
+    comment_texts = []
+    for c in user_data.get('comments', []):
+        timestamp = format_unix_time(c.get('date', ''))
+        text = c.get('text', '')
+        comment_texts.append(f"[{timestamp}] {text}")
+    user_data_text = "\n".join(comment_texts)
+
+    # 変数置換（失敗しても素通し）
+    analysis_prompt = prompt_template or ""
+    try:
+        analysis_prompt = analysis_prompt.format(
+            user=user_data.get('user_name') or f"ユーザー{user_data.get('user_id','')}",
+            lv_title=live_title
+        )
+    except Exception as e:
+        print(f"プロンプト変数置換エラー: {e}")
+
+    # 最終プロンプト
+    full_prompt = f"""
+{analysis_prompt}
+
+ユーザーID: {user_data.get('user_id','')}
+表示名: {user_data.get('user_name','')}
+総コメント数: {len(user_data.get('comments', []))}件
+
+コメント履歴:
+{user_data_text}
+
+上記のデータを基に、このユーザーの詳細な分析を日本語で行ってください。
+分析結果はHTML形式で出力し、<br>タグで改行してください。
+""".strip()
+    return full_prompt
+
+
 
 def clean_ai_response(ai_response):
     """AI分析結果からコードブロック記法やMarkdown記法を除去"""

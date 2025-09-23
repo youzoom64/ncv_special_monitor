@@ -1,25 +1,31 @@
+# config_manager.py (完全書き換え)
 import json
 import os
+from pathlib import Path
 from datetime import datetime
+import shutil
 
-class NCVSpecialConfigManager:
+class IndividualConfigManager:
     def __init__(self):
-        self.config_dir = os.path.abspath("config")
-        self.config_file = os.path.join(self.config_dir, "ncv_special_config.json")
-        self.processed_xmls_file = os.path.join(self.config_dir, "processed_xmls.json")
-        self.ensure_directories()
-    
-    def ensure_directories(self):
-        """必要なディレクトリを作成"""
-        os.makedirs(self.config_dir, exist_ok=True)
+        self.specialuser_root = Path("SpecialUser")
+        self.global_config_path = self.specialuser_root / "global_config.json"
+        self.processed_xmls_file = Path("config") / "processed_xmls.json"
         
-        # デフォルト設定を作成
-        if not os.path.exists(self.config_file):
-            self.create_default_config()
+        # SpecialUserディレクトリ作成
+        self.specialuser_root.mkdir(exist_ok=True)
     
-    def create_default_config(self):
-        """デフォルト設定を作成"""
-        default_config = {
+    def load_config(self):
+        """既存のload_config互換のため、グローバル設定を返す"""
+        return self.load_global_config()
+    
+    def load_global_config(self) -> dict:
+        """グローバル設定（API設定など）を読み込み"""
+        if self.global_config_path.exists():
+            with open(self.global_config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        
+        # デフォルトグローバル設定
+        default_global = {
             "ncv_folder_path": "C:\\Users\\youzo\\AppData\\Roaming\\posite-c\\NiconamaCommentViewer\\CommentLog",
             "monitor_enabled": True,
             "check_interval_minutes": 5,
@@ -31,107 +37,112 @@ class NCVSpecialConfigManager:
                 "suno_api_key": "",
                 "imgur_api_key": ""
             },
-            "special_users_config": {
-                "default_analysis_enabled": True,
-                "default_analysis_ai_model": "openai-gpt4o",
-                "default_analysis_prompt": "以下のユーザーのコメント履歴を分析して、このユーザーの特徴、傾向、配信との関わり方について詳しく分析してください。\\n\\n分析観点：\\n- コメントの頻度と投稿タイミング\\n- コメント内容の傾向（質問、感想、ツッコミなど）\\n- 配信者との関係性\\n- 他の視聴者との関わり\\n- このユーザーの配信に対する貢献度\\n- 特徴的な発言や行動パターン",
-                "default_template": "user_detail.html",
-                "users": {}
-            },
+            "default_analysis_ai_model": "openai-gpt4o",
+            "default_analysis_prompt": "以下のユーザーのコメント履歴を分析してください...",
             "last_updated": datetime.now().isoformat()
         }
         
-        self.save_config(default_config)
+        self.save_global_config(default_global)
+        return default_global
     
-    def load_config(self):
-        """設定を読み込み"""
-        try:
-            with open(self.config_file, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            
-            # 設定の補完（後方互換性）
-            default_config = self.get_default_config_template()
-            merged_config = self._merge_config_deep(default_config, config)
-            
-            return merged_config
-        except Exception as e:
-            print(f"設定読み込みエラー: {str(e)}")
-            return self.get_default_config_template()
-    
-    def save_config(self, config):
-        """設定を保存"""
+    def save_global_config(self, config: dict):
+        """グローバル設定を保存"""
         config["last_updated"] = datetime.now().isoformat()
-        
-        with open(self.config_file, 'w', encoding='utf-8') as f:
+        with open(self.global_config_path, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-        
     
-    def get_default_config_template(self):
-        """デフォルト設定テンプレートを取得"""
+    def load_user_config(self, user_id: str, display_name: str = None) -> dict:
+        """個別ユーザー設定を読み込み"""
+        if display_name is None:
+            display_name = f"ユーザー{user_id}"
+            
+        user_dir = self.specialuser_root / f"{user_id}_{display_name}"
+        config_path = user_dir / "config.json"
+        
+        if config_path.exists():
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        
+        # デフォルト個別設定を返す
+        return self.create_default_user_config(user_id, display_name)
+    
+    def create_default_user_config(self, user_id: str, display_name: str) -> dict:
+        """デフォルトの個別ユーザー設定を作成"""
         return {
-            "ncv_folder_path": "C:\\Users\\youzo\\AppData\\Roaming\\posite-c\\NiconamaCommentViewer\\CommentLog",
-            "monitor_enabled": True,
-            "check_interval_minutes": 5,
-            "retry_count": 3,
-            "api_settings": {
-                "summary_ai_model": "openai-gpt4o",
-                "openai_api_key": "",
-                "google_api_key": "",
-                "suno_api_key": "",
-                "imgur_api_key": ""
+            "user_info": {
+                "user_id": user_id,
+                "display_name": display_name,
+                "description": "",
+                "tags": []
             },
-            "special_users_config": {
-                "default_analysis_enabled": True,
-                "default_analysis_ai_model": "openai-gpt4o",
-                "default_analysis_prompt": "以下のユーザーのコメント履歴を分析してください...",
-                "default_template": "user_detail.html",
-                "users": {}
+            "ai_analysis": {
+                "enabled": True,
+                "model": "openai-gpt4o",
+                "custom_prompt": "",
+                "use_default_prompt": True
+            },
+            "comment_system": {
+                "send_message": f">>{'{no}'} こんにちは、{display_name}さん",
+                "trigger_conditions": {
+                    "enabled": True,
+                    "trigger_type": "first_comment",
+                    "keywords": ["こんにちは", "初見"],
+                    "max_reactions_per_stream": 1,
+                    "cooldown_minutes": 30
+                }
+            },
+            "template_settings": {
+                "template": "user_detail.html"
+            },
+            "metadata": {
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "config_version": "2.0"
             }
         }
     
-    def _merge_config_deep(self, default, loaded):
-        """設定を深くマージして不足項目を補完"""
-        result = default.copy()
+    def save_user_config(self, user_id: str, display_name: str, config: dict):
+        """個別ユーザー設定を保存"""
+        user_dir = self.specialuser_root / f"{user_id}_{display_name}"
+        user_dir.mkdir(parents=True, exist_ok=True)
         
-        for key, value in loaded.items():
-            if key in result:
-                if isinstance(value, dict) and isinstance(result[key], dict):
-                    result[key] = self._merge_config_deep(result[key], value)
-                else:
-                    result[key] = value
-            else:
-                result[key] = value
+        config_path = user_dir / "config.json"
+        config["metadata"]["updated_at"] = datetime.now().isoformat()
         
-        return result
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    
+    def get_all_special_users(self) -> list:
+        """全スペシャルユーザーのリストを取得"""
+        users = []
+        for user_dir in self.specialuser_root.iterdir():
+            if user_dir.is_dir() and "_" in user_dir.name and not user_dir.name.startswith("global"):
+                config_path = user_dir / "config.json"
+                if config_path.exists():
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            config = json.load(f)
+                        users.append(config["user_info"])
+                    except Exception as e:
+                        print(f"設定読み込みエラー {user_dir.name}: {e}")
+        return users
     
     def get_special_users_list(self):
-        """スペシャルユーザーIDのリストを取得"""
-        config = self.load_config()
-        special_users_config = config.get("special_users_config", {})
-        users = special_users_config.get("users", {})
-        return list(users.keys())
+        """既存のget_special_users_list互換"""
+        users = self.get_all_special_users()
+        return [user["user_id"] for user in users]
     
     def get_user_config(self, user_id):
-        """個別ユーザーの設定を取得"""
-        config = self.load_config()
-        special_users_config = config.get("special_users_config", {})
-        users = special_users_config.get("users", {})
+        """既存のget_user_config互換"""
+        users = self.get_all_special_users()
+        for user in users:
+            if user["user_id"] == user_id:
+                return self.load_user_config(user_id, user["display_name"])
         
-        if user_id in users:
-            return users[user_id]
-        
-        # デフォルト設定を返す
-        return {
-            "user_id": user_id,
-            "display_name": f"ユーザー{user_id}",
-            "analysis_enabled": special_users_config.get("default_analysis_enabled", True),
-            "analysis_ai_model": special_users_config.get("default_analysis_ai_model", "openai-gpt4o"),
-            "analysis_prompt": special_users_config.get("default_analysis_prompt", ""),
-            "template": special_users_config.get("default_template", "user_detail.html"),
-            "description": "",
-            "tags": []
-        }
+        # 見つからない場合はデフォルトを返す
+        return self.create_default_user_config(user_id, f"ユーザー{user_id}")
     
+    # 既存の処理済みXML管理メソッドはそのまま維持
     def load_processed_xmls(self):
         """処理済みXMLリストを読み込み"""
         try:
@@ -141,17 +152,16 @@ class NCVSpecialConfigManager:
                 return data.get("processed_xmls", [])
         except Exception as e:
             print(f"処理済みXML読み込みエラー: {str(e)}")
-        
         return []
     
     def save_processed_xmls(self, processed_list):
         """処理済みXMLリストを保存"""
         try:
+            os.makedirs(os.path.dirname(self.processed_xmls_file), exist_ok=True)
             data = {
                 "processed_xmls": processed_list,
                 "last_updated": datetime.now().isoformat()
             }
-            
             with open(self.processed_xmls_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -168,3 +178,6 @@ class NCVSpecialConfigManager:
         """XMLが処理済みかチェック"""
         processed_list = self.load_processed_xmls()
         return xml_path in processed_list
+
+# 既存のコードとの互換性のため
+NCVSpecialConfigManager = IndividualConfigManager

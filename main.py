@@ -10,6 +10,8 @@ from datetime import datetime
 import webbrowser
 import tempfile
 import random
+import websockets
+import asyncio
 
 from config_manager import HierarchicalConfigManager
 from logger import NCVSpecialLogger
@@ -912,7 +914,7 @@ class UserEditDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("スペシャルユーザー編集" if user_id else "スペシャルユーザー追加")
-        self.dialog.geometry("600x700")
+        self.dialog.geometry("1000x700")  # 幅を広げる
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -923,8 +925,16 @@ class UserEditDialog:
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # 左右分割
+        left_frame = ttk.Frame(main_frame)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+
+        right_frame = ttk.Frame(main_frame)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+
+        # === 左側：編集フォーム ===
         # 基本情報
-        basic_frame = ttk.LabelFrame(main_frame, text="基本情報", padding="5")
+        basic_frame = ttk.LabelFrame(left_frame, text="基本情報", padding="5")
         basic_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(basic_frame, text="ユーザーID:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
@@ -942,7 +952,7 @@ class UserEditDialog:
         basic_frame.columnconfigure(1, weight=1)
 
         # AI分析設定
-        ai_frame = ttk.LabelFrame(main_frame, text="AI分析設定", padding="5")
+        ai_frame = ttk.LabelFrame(left_frame, text="AI分析設定", padding="5")
         ai_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.analysis_enabled_var = tk.BooleanVar(value=self.user_config.get("ai_analysis", {}).get("enabled", True))
@@ -953,7 +963,7 @@ class UserEditDialog:
         ttk.Combobox(ai_frame, textvariable=self.analysis_model_var, values=["openai-gpt4o", "google-gemini-2.5-flash"]).pack(fill=tk.X, pady=2)
 
         # デフォルト応答設定
-        response_frame = ttk.LabelFrame(main_frame, text="デフォルト応答設定", padding="5")
+        response_frame = ttk.LabelFrame(left_frame, text="デフォルト応答設定", padding="5")
         response_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # 応答タイプ
@@ -992,17 +1002,104 @@ class UserEditDialog:
         ttk.Entry(reaction_frame, textvariable=self.delay_var, width=10).grid(row=0, column=3, padx=(5, 0))
 
         # スペシャルトリガー管理
-        triggers_frame = ttk.LabelFrame(main_frame, text="スペシャルトリガー", padding="5")
+        triggers_frame = ttk.LabelFrame(left_frame, text="スペシャルトリガー", padding="5")
         triggers_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Button(triggers_frame, text="スペシャルトリガー管理", command=self.manage_special_triggers).pack()
 
         # ボタン
-        button_frame = ttk.Frame(main_frame)
+        button_frame = ttk.Frame(left_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
 
         ttk.Button(button_frame, text="保存", command=self.save_user).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(button_frame, text="キャンセル", command=self.cancel).pack(side=tk.LEFT)
+
+        # === 右側：配信者一覧 ===
+        broadcasters_frame = ttk.LabelFrame(right_frame, text="配信者一覧", padding="5")
+        broadcasters_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 配信者一覧Treeview
+        self.broadcasters_tree = ttk.Treeview(
+            broadcasters_frame,
+            columns=("broadcaster_id", "broadcaster_name", "enabled"),
+            show="tree headings",
+            height=20
+        )
+        self.broadcasters_tree.heading("#0", text="有効")
+        self.broadcasters_tree.heading("broadcaster_id", text="配信者ID")
+        self.broadcasters_tree.heading("broadcaster_name", text="配信者名")
+        self.broadcasters_tree.heading("enabled", text="状態")
+
+        self.broadcasters_tree.column("#0", width=60)
+        self.broadcasters_tree.column("broadcaster_id", width=100)
+        self.broadcasters_tree.column("broadcaster_name", width=150)
+        self.broadcasters_tree.column("enabled", width=50)
+
+        self.broadcasters_tree.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
+
+        # ダブルクリックで配信者管理画面へ
+        self.broadcasters_tree.bind("<Double-1>", self.on_broadcaster_double_click)
+        # チェックボックスクリックイベント
+        self.broadcasters_tree.bind("<Button-1>", self.on_broadcaster_click)
+
+        # 配信者操作ボタン
+        broadcaster_button_frame = ttk.Frame(broadcasters_frame)
+        broadcaster_button_frame.pack(fill=tk.X)
+
+        ttk.Button(broadcaster_button_frame, text="配信者追加", command=self.add_broadcaster).pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Button(broadcaster_button_frame, text="削除", command=self.delete_broadcaster).pack(side=tk.LEFT, padx=(2, 2))
+        ttk.Button(broadcaster_button_frame, text="一括有効", command=self.enable_all_broadcasters).pack(side=tk.LEFT, padx=(2, 2))
+        ttk.Button(broadcaster_button_frame, text="一括無効", command=self.disable_all_broadcasters).pack(side=tk.LEFT, padx=(2, 0))
+
+        # 配信者一覧を初期読み込み
+        self.refresh_broadcasters_list()
+
+    def refresh_broadcasters_list(self):
+        """配信者一覧を更新"""
+        # 既存の項目をクリア
+        for item in self.broadcasters_tree.get_children():
+            self.broadcasters_tree.delete(item)
+
+        # ユーザー設定から配信者一覧を取得
+        if self.user_id:
+            user_config = self.config_manager.get_user_config(self.user_id)
+            broadcasters = user_config.get("broadcasters", {})
+
+            for broadcaster_id, broadcaster_info in broadcasters.items():
+                broadcaster_name = broadcaster_info.get("broadcaster_name", f"配信者{broadcaster_id}")
+                enabled = broadcaster_info.get("enabled", True)
+                status = "有効" if enabled else "無効"
+                checkbox = "☑" if enabled else "☐"
+
+                self.broadcasters_tree.insert(
+                    "",
+                    tk.END,
+                    text=checkbox,
+                    values=(broadcaster_id, broadcaster_name, status)
+                )
+
+    def on_broadcaster_double_click(self, event):
+        """配信者ダブルクリック処理"""
+        selection = self.broadcasters_tree.selection()
+        if not selection:
+            return
+
+        # 選択された配信者の情報を取得
+        item_values = self.broadcasters_tree.item(selection[0], "values")
+        broadcaster_id = item_values[0]
+
+        # 現在のユーザーIDを取得
+        current_user_id = self.user_id or self.user_id_var.get().strip()
+        if not current_user_id:
+            log_to_gui("ユーザーIDが設定されていません")
+            return
+
+        # 配信者編集ダイアログを直接開く
+        dialog = BroadcasterEditDialog(self.dialog, self.config_manager, current_user_id, broadcaster_id)
+        self.dialog.wait_window(dialog.dialog)
+
+        # ダイアログが閉じられた後、配信者一覧を更新
+        self.refresh_broadcasters_list()
 
     def fetch_user_name(self):
         """ユーザー名取得"""
@@ -1092,6 +1189,112 @@ class UserEditDialog:
     def cancel(self):
         self.dialog.destroy()
 
+    def add_broadcaster(self):
+        """配信者追加"""
+        current_user_id = self.user_id or self.user_id_var.get().strip()
+        if not current_user_id:
+            log_to_gui("ユーザーIDが設定されていません")
+            return
+
+        # 簡単な配信者追加ダイアログ
+        dialog = SimpleBroadcasterEditDialog(self.dialog, self.config_manager, current_user_id)
+        self.dialog.wait_window(dialog.dialog)
+
+        if dialog.result:
+            self.refresh_broadcasters_list()
+
+    def delete_broadcaster(self):
+        """配信者削除"""
+        selection = self.broadcasters_tree.selection()
+        if not selection:
+            log_to_gui("削除する配信者を選択してください")
+            return
+
+        current_user_id = self.user_id or self.user_id_var.get().strip()
+        if not current_user_id:
+            log_to_gui("ユーザーIDが設定されていません")
+            return
+
+        # 選択された配信者の情報を取得
+        item_values = self.broadcasters_tree.item(selection[0], "values")
+        broadcaster_id = item_values[0]
+        broadcaster_name = item_values[1]
+
+        # 確認ダイアログ
+        import tkinter.messagebox as msgbox
+        if msgbox.askyesno("確認", f"配信者 '{broadcaster_name}' を削除しますか？"):
+            user_config = self.config_manager.get_user_config(current_user_id)
+            broadcasters = user_config.get("broadcasters", {})
+            if broadcaster_id in broadcasters:
+                del broadcasters[broadcaster_id]
+                user_config["broadcasters"] = broadcasters
+                self.config_manager.save_user_config(current_user_id, user_config)
+                self.refresh_broadcasters_list()
+                log_to_gui(f"配信者 '{broadcaster_name}' を削除しました")
+
+
+    def on_broadcaster_click(self, event):
+        """配信者のチェックボックスクリック処理"""
+        item = self.broadcasters_tree.identify('item', event.x, event.y)
+        column = self.broadcasters_tree.identify('column', event.x, event.y)
+
+        # チェックボックス列（#0）がクリックされた場合
+        if item and column == "#0":
+            current_user_id = self.user_id or self.user_id_var.get().strip()
+            if not current_user_id:
+                log_to_gui("ユーザーIDが設定されていません")
+                return
+
+            # 選択された配信者の情報を取得
+            item_values = self.broadcasters_tree.item(item, "values")
+            broadcaster_id = item_values[0]
+            broadcaster_name = item_values[1]
+
+            # 現在の状態を取得し、切り替える
+            user_config = self.config_manager.get_user_config(current_user_id)
+            broadcasters = user_config.get("broadcasters", {})
+            if broadcaster_id in broadcasters:
+                current_enabled = broadcasters[broadcaster_id].get("enabled", True)
+                new_enabled = not current_enabled
+                broadcasters[broadcaster_id]["enabled"] = new_enabled
+                user_config["broadcasters"] = broadcasters
+                self.config_manager.save_user_config(current_user_id, user_config)
+                self.refresh_broadcasters_list()
+                action = "有効" if new_enabled else "無効"
+                log_to_gui(f"配信者 '{broadcaster_name}' を{action}にしました")
+
+    def enable_all_broadcasters(self):
+        """すべての配信者を有効化"""
+        self._toggle_all_broadcasters_enabled(True)
+
+    def disable_all_broadcasters(self):
+        """すべての配信者を無効化"""
+        self._toggle_all_broadcasters_enabled(False)
+
+    def _toggle_all_broadcasters_enabled(self, enabled):
+        """すべての配信者の有効/無効を切り替え"""
+        current_user_id = self.user_id or self.user_id_var.get().strip()
+        if not current_user_id:
+            log_to_gui("ユーザーIDが設定されていません")
+            return
+
+        user_config = self.config_manager.get_user_config(current_user_id)
+        broadcasters = user_config.get("broadcasters", {})
+
+        if not broadcasters:
+            log_to_gui("配信者が設定されていません")
+            return
+
+        # すべての配信者の設定を更新
+        for broadcaster_id, broadcaster_info in broadcasters.items():
+            broadcaster_info["enabled"] = enabled
+
+        user_config["broadcasters"] = broadcasters
+        self.config_manager.save_user_config(current_user_id, user_config)
+        self.refresh_broadcasters_list()
+        action = "有効" if enabled else "無効"
+        log_to_gui(f"すべての配信者を{action}にしました")
+
 
 class BroadcasterManagementDialog:
     def __init__(self, parent, config_manager, user_id, user_display_name):
@@ -1102,7 +1305,7 @@ class BroadcasterManagementDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(f"配信者管理 - {user_display_name}")
-        self.dialog.geometry("700x500")
+        self.dialog.geometry("1000x500")  # 幅を広げる
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -1114,8 +1317,15 @@ class BroadcasterManagementDialog:
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 配信者一覧
-        list_frame = ttk.LabelFrame(main_frame, text="配信者一覧", padding="5")
+        # 左右分割
+        left_frame = ttk.Frame(main_frame)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+
+        right_frame = ttk.Frame(main_frame)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+
+        # === 左側：配信者一覧 ===
+        list_frame = ttk.LabelFrame(left_frame, text="配信者一覧", padding="5")
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         self.broadcasters_tree = ttk.Treeview(
@@ -1142,7 +1352,7 @@ class BroadcasterManagementDialog:
         self.broadcasters_tree.pack(fill=tk.BOTH, expand=True)
 
         # ボタン
-        button_frame = ttk.Frame(main_frame)
+        button_frame = ttk.Frame(left_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
 
         ttk.Button(button_frame, text="配信者追加", command=self.add_broadcaster).pack(side=tk.LEFT, padx=(0, 5))
@@ -1153,6 +1363,109 @@ class BroadcasterManagementDialog:
         ttk.Button(button_frame, text="配信者削除", command=self.delete_broadcaster).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="トリガー管理", command=self.manage_triggers).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="閉じる", command=self.close_dialog).pack(side=tk.RIGHT)
+
+        # === 右側：トリガー一覧 ===
+        triggers_frame = ttk.LabelFrame(right_frame, text="選択された配信者のトリガー一覧", padding="5")
+        triggers_frame.pack(fill=tk.BOTH, expand=True)
+
+        # トリガー一覧Treeview
+        self.triggers_tree = ttk.Treeview(
+            triggers_frame,
+            columns=("trigger_name", "enabled", "keywords", "response_type"),
+            show="headings",
+            height=15
+        )
+        self.triggers_tree.heading("trigger_name", text="トリガー名")
+        self.triggers_tree.heading("enabled", text="有効")
+        self.triggers_tree.heading("keywords", text="キーワード")
+        self.triggers_tree.heading("response_type", text="応答タイプ")
+
+        self.triggers_tree.column("trigger_name", width=120)
+        self.triggers_tree.column("enabled", width=50)
+        self.triggers_tree.column("keywords", width=150)
+        self.triggers_tree.column("response_type", width=80)
+
+        self.triggers_tree.pack(fill=tk.BOTH, expand=True)
+
+        # ダブルクリックでトリガー管理画面へ
+        self.triggers_tree.bind("<Double-1>", self.on_trigger_double_click)
+
+        # 配信者選択でトリガー一覧更新
+        self.broadcasters_tree.bind("<<TreeviewSelect>>", self.on_broadcaster_select)
+
+        # トリガー一覧を初期表示（選択されていない状態）
+        self.refresh_triggers_for_selected_broadcaster()
+
+    def on_broadcaster_select(self, event):
+        """配信者選択時の処理"""
+        self.refresh_triggers_for_selected_broadcaster()
+
+    def refresh_triggers_for_selected_broadcaster(self):
+        """選択された配信者のトリガー一覧を更新"""
+        # 既存の項目をクリア
+        for item in self.triggers_tree.get_children():
+            self.triggers_tree.delete(item)
+
+        # 選択された配信者を取得
+        selection = self.broadcasters_tree.selection()
+        if not selection:
+            return
+
+        # 選択された配信者の情報を取得
+        selected_item = self.broadcasters_tree.item(selection[0])
+        broadcaster_id = selected_item["values"][0] if selected_item["values"] else None
+
+        if not broadcaster_id:
+            return
+
+        # ユーザー設定から配信者のトリガーを取得
+        user_config = self.config_manager.get_user_config(self.user_id)
+        broadcasters = user_config.get("broadcasters", {})
+        broadcaster_info = broadcasters.get(broadcaster_id, {})
+        triggers = broadcaster_info.get("triggers", [])
+
+        # トリガー一覧を表示
+        for trigger in triggers:
+            trigger_name = trigger.get("name", "無名トリガー")
+            enabled = "有効" if trigger.get("enabled", True) else "無効"
+            keywords = ", ".join(trigger.get("keywords", [])[:3])  # 最初の3つのキーワードを表示
+            if len(trigger.get("keywords", [])) > 3:
+                keywords += "..."
+            response_type = trigger.get("response_type", "定型")
+
+            self.triggers_tree.insert(
+                "",
+                tk.END,
+                values=(trigger_name, enabled, keywords, response_type)
+            )
+
+    def on_trigger_double_click(self, event):
+        """トリガーダブルクリック処理"""
+        selection = self.triggers_tree.selection()
+        if not selection:
+            return
+
+        # 選択された配信者を取得
+        broadcaster_selection = self.broadcasters_tree.selection()
+        if not broadcaster_selection:
+            log_to_gui("配信者が選択されていません")
+            return
+
+        # 選択された配信者の情報を取得
+        broadcaster_item = self.broadcasters_tree.item(broadcaster_selection[0])
+        broadcaster_id = broadcaster_item["values"][0] if broadcaster_item["values"] else None
+        broadcaster_name = broadcaster_item["values"][1] if len(broadcaster_item["values"]) > 1 else f"配信者{broadcaster_id}"
+
+        if not broadcaster_id:
+            log_to_gui("配信者IDが取得できません")
+            return
+
+        # トリガー管理ダイアログを開く
+        dialog = TriggerManagementDialog(self.dialog, self.config_manager, self.user_id, broadcaster_id, broadcaster_name)
+        self.dialog.wait_window(dialog.dialog)
+
+        # ダイアログが閉じられた後、トリガー一覧を更新
+        self.refresh_triggers_for_selected_broadcaster()
 
     def refresh_broadcasters_list(self):
         """配信者一覧を更新"""
@@ -1343,7 +1656,7 @@ class BroadcasterEditDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("配信者編集" if broadcaster_id else "配信者追加")
-        self.dialog.geometry("500x400")
+        self.dialog.geometry("1000x500")
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -1354,8 +1667,16 @@ class BroadcasterEditDialog:
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # 左右分割
+        left_frame = ttk.Frame(main_frame)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+
+        right_frame = ttk.Frame(main_frame)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+
+        # === 左側：配信者設定 ===
         # 基本情報
-        basic_frame = ttk.LabelFrame(main_frame, text="基本情報", padding="5")
+        basic_frame = ttk.LabelFrame(left_frame, text="基本情報", padding="5")
         basic_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(basic_frame, text="配信者ID:").grid(row=0, column=0, sticky=tk.W)
@@ -1372,7 +1693,7 @@ class BroadcasterEditDialog:
         basic_frame.columnconfigure(1, weight=1)
 
         # デフォルト応答設定（配信者用）
-        response_frame = ttk.LabelFrame(main_frame, text="この配信者でのデフォルト応答設定", padding="5")
+        response_frame = ttk.LabelFrame(left_frame, text="この配信者でのデフォルト応答設定", padding="5")
         response_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # 応答タイプ
@@ -1408,11 +1729,53 @@ class BroadcasterEditDialog:
         ttk.Entry(reaction_frame, textvariable=self.delay_var, width=10).grid(row=0, column=3, padx=(5, 0))
 
         # ボタン
-        button_frame = ttk.Frame(main_frame)
+        button_frame = ttk.Frame(left_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
 
         ttk.Button(button_frame, text="保存", command=self.save_broadcaster).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(button_frame, text="キャンセル", command=self.cancel).pack(side=tk.LEFT)
+
+        # === 右側：トリガー一覧 ===
+        triggers_frame = ttk.LabelFrame(right_frame, text="この配信者のトリガー一覧", padding="5")
+        triggers_frame.pack(fill=tk.BOTH, expand=True)
+
+        # トリガー一覧Treeview
+        self.triggers_tree = ttk.Treeview(
+            triggers_frame,
+            columns=("trigger_name", "enabled", "keywords", "response_type"),
+            show="tree headings",
+            height=15
+        )
+        self.triggers_tree.heading("#0", text="有効")
+        self.triggers_tree.heading("trigger_name", text="トリガー名")
+        self.triggers_tree.heading("enabled", text="状態")
+        self.triggers_tree.heading("keywords", text="キーワード")
+        self.triggers_tree.heading("response_type", text="応答タイプ")
+
+        self.triggers_tree.column("#0", width=60)
+        self.triggers_tree.column("trigger_name", width=120)
+        self.triggers_tree.column("enabled", width=50)
+        self.triggers_tree.column("keywords", width=100)
+        self.triggers_tree.column("response_type", width=80)
+
+        self.triggers_tree.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
+
+        # ダブルクリックでトリガー管理画面へ
+        self.triggers_tree.bind("<Double-1>", self.on_trigger_double_click)
+        # チェックボックスクリックイベント
+        self.triggers_tree.bind("<Button-1>", self.on_trigger_click)
+
+        # トリガー操作ボタン
+        trigger_button_frame = ttk.Frame(triggers_frame)
+        trigger_button_frame.pack(fill=tk.X)
+
+        ttk.Button(trigger_button_frame, text="トリガー追加", command=self.add_trigger).pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Button(trigger_button_frame, text="削除", command=self.delete_trigger).pack(side=tk.LEFT, padx=(2, 2))
+        ttk.Button(trigger_button_frame, text="一括有効", command=self.enable_all_triggers).pack(side=tk.LEFT, padx=(2, 2))
+        ttk.Button(trigger_button_frame, text="一括無効", command=self.disable_all_triggers).pack(side=tk.LEFT, padx=(2, 0))
+
+        # トリガー一覧を初期表示
+        self.refresh_triggers_list()
 
     def save_broadcaster(self):
         """配信者保存"""
@@ -1452,6 +1815,186 @@ class BroadcasterEditDialog:
 
     def cancel(self):
         self.dialog.destroy()
+
+    def refresh_triggers_list(self):
+        """トリガー一覧を更新"""
+        # 既存の項目をクリア
+        for item in self.triggers_tree.get_children():
+            self.triggers_tree.delete(item)
+
+        # 配信者IDが設定されていない場合は何も表示しない
+        broadcaster_id = self.broadcaster_id or self.broadcaster_id_var.get().strip()
+        if not broadcaster_id:
+            return
+
+        # 現在の配信者のトリガーを取得
+        user_config = self.config_manager.get_user_config(self.user_id)
+        broadcasters = user_config.get("broadcasters", {})
+        broadcaster_info = broadcasters.get(broadcaster_id, {})
+        triggers = broadcaster_info.get("triggers", [])
+
+        # トリガー一覧を表示
+        for trigger in triggers:
+            trigger_name = trigger.get("name", "無名トリガー")
+            enabled = trigger.get("enabled", True)
+            status = "有効" if enabled else "無効"
+            checkbox = "☑" if enabled else "☐"
+            keywords = ", ".join(trigger.get("keywords", [])[:3])  # 最初の3つのキーワードを表示
+            if len(trigger.get("keywords", [])) > 3:
+                keywords += "..."
+            response_type_map = {"predefined": "定型", "ai": "AI"}
+            response_type = response_type_map.get(trigger.get("response_type", "predefined"), "定型")
+
+            self.triggers_tree.insert(
+                "",
+                tk.END,
+                text=checkbox,
+                values=(trigger_name, status, keywords, response_type)
+            )
+
+    def on_trigger_double_click(self, event):
+        """トリガーダブルクリック処理"""
+        selection = self.triggers_tree.selection()
+        if not selection:
+            return
+
+        # 配信者IDを取得
+        broadcaster_id = self.broadcaster_id or self.broadcaster_id_var.get().strip()
+        if not broadcaster_id:
+            log_to_gui("配信者IDが設定されていません")
+            return
+
+        # 配信者名を取得
+        broadcaster_name = self.broadcaster_name_var.get().strip() or f"配信者{broadcaster_id}"
+
+        # トリガー管理ダイアログを開く
+        dialog = TriggerManagementDialog(self.dialog, self.config_manager, self.user_id, broadcaster_id, broadcaster_name)
+        self.dialog.wait_window(dialog.dialog)
+
+        # ダイアログが閉じられた後、トリガー一覧を更新
+        self.refresh_triggers_list()
+
+    def add_trigger(self):
+        """トリガー追加"""
+        broadcaster_id = self.broadcaster_id or self.broadcaster_id_var.get().strip()
+        if not broadcaster_id:
+            log_to_gui("配信者IDが設定されていません")
+            return
+
+        broadcaster_name = self.broadcaster_name_var.get().strip() or f"配信者{broadcaster_id}"
+
+        # 簡単なトリガー追加ダイアログ
+        dialog = SimpleTriggerEditDialog(self.dialog, self.config_manager, self.user_id, broadcaster_id, broadcaster_name)
+        self.dialog.wait_window(dialog.dialog)
+
+        if dialog.result:
+            self.refresh_triggers_list()
+
+    def delete_trigger(self):
+        """トリガー削除"""
+        selection = self.triggers_tree.selection()
+        if not selection:
+            log_to_gui("削除するトリガーを選択してください")
+            return
+
+        broadcaster_id = self.broadcaster_id or self.broadcaster_id_var.get().strip()
+        if not broadcaster_id:
+            log_to_gui("配信者IDが設定されていません")
+            return
+
+        # 選択されたトリガーの情報を取得
+        item_values = self.triggers_tree.item(selection[0], "values")
+        trigger_name = item_values[0]
+
+        # 確認ダイアログ
+        import tkinter.messagebox as msgbox
+        if msgbox.askyesno("確認", f"トリガー '{trigger_name}' を削除しますか？"):
+            user_config = self.config_manager.get_user_config(self.user_id)
+            broadcasters = user_config.get("broadcasters", {})
+            if broadcaster_id in broadcasters:
+                triggers = broadcasters[broadcaster_id].get("triggers", [])
+                # 名前でトリガーを検索して削除
+                updated_triggers = [t for t in triggers if t.get("name", "") != trigger_name]
+                broadcasters[broadcaster_id]["triggers"] = updated_triggers
+                user_config["broadcasters"] = broadcasters
+                self.config_manager.save_user_config(self.user_id, user_config)
+                self.refresh_triggers_list()
+                log_to_gui(f"トリガー '{trigger_name}' を削除しました")
+
+
+    def on_trigger_click(self, event):
+        """トリガーのチェックボックスクリック処理"""
+        item = self.triggers_tree.identify('item', event.x, event.y)
+        column = self.triggers_tree.identify('column', event.x, event.y)
+
+        # チェックボックス列（#0）がクリックされた場合
+        if item and column == "#0":
+            broadcaster_id = self.broadcaster_id or self.broadcaster_id_var.get().strip()
+            if not broadcaster_id:
+                log_to_gui("配信者IDが設定されていません")
+                return
+
+            # 選択されたトリガーの情報を取得
+            item_values = self.triggers_tree.item(item, "values")
+            trigger_name = item_values[0]
+
+            # 現在の状態を取得し、切り替える
+            user_config = self.config_manager.get_user_config(self.user_id)
+            broadcasters = user_config.get("broadcasters", {})
+            if broadcaster_id in broadcasters:
+                triggers = broadcasters[broadcaster_id].get("triggers", [])
+                # 名前でトリガーを検索して有効/無効を切り替える
+                for trigger in triggers:
+                    if trigger.get("name", "") == trigger_name:
+                        current_enabled = trigger.get("enabled", True)
+                        new_enabled = not current_enabled
+                        trigger["enabled"] = new_enabled
+                        break
+
+                broadcasters[broadcaster_id]["triggers"] = triggers
+                user_config["broadcasters"] = broadcasters
+                self.config_manager.save_user_config(self.user_id, user_config)
+                self.refresh_triggers_list()
+                action = "有効" if new_enabled else "無効"
+                log_to_gui(f"トリガー '{trigger_name}' を{action}にしました")
+
+    def enable_all_triggers(self):
+        """すべてのトリガーを有効化"""
+        self._toggle_all_triggers_enabled(True)
+
+    def disable_all_triggers(self):
+        """すべてのトリガーを無効化"""
+        self._toggle_all_triggers_enabled(False)
+
+    def _toggle_all_triggers_enabled(self, enabled):
+        """すべてのトリガーの有効/無効を切り替え"""
+        broadcaster_id = self.broadcaster_id or self.broadcaster_id_var.get().strip()
+        if not broadcaster_id:
+            log_to_gui("配信者IDが設定されていません")
+            return
+
+        user_config = self.config_manager.get_user_config(self.user_id)
+        broadcasters = user_config.get("broadcasters", {})
+
+        if broadcaster_id not in broadcasters:
+            log_to_gui("配信者が見つかりません")
+            return
+
+        triggers = broadcasters[broadcaster_id].get("triggers", [])
+        if not triggers:
+            log_to_gui("トリガーが設定されていません")
+            return
+
+        # すべてのトリガーの設定を更新
+        for trigger in triggers:
+            trigger["enabled"] = enabled
+
+        broadcasters[broadcaster_id]["triggers"] = triggers
+        user_config["broadcasters"] = broadcasters
+        self.config_manager.save_user_config(self.user_id, user_config)
+        self.refresh_triggers_list()
+        action = "有効" if enabled else "無効"
+        log_to_gui(f"すべてのトリガーを{action}にしました")
 
 
 class TriggerManagementDialog:
@@ -2224,6 +2767,256 @@ def should_trigger_fire(trigger_config):
     random_value = random.randint(0, 99)
 
     return random_value < probability
+
+
+class SimpleBroadcasterEditDialog:
+    """配信者追加用の簡単なダイアログ"""
+    def __init__(self, parent, config_manager, user_id, broadcaster_id=None):
+        self.result = False
+        self.config_manager = config_manager
+        self.user_id = user_id
+        self.broadcaster_id = broadcaster_id
+
+        # 既存の配信者設定を取得（編集の場合）
+        if broadcaster_id:
+            user_config = config_manager.get_user_config(user_id)
+            broadcasters = user_config.get("broadcasters", {})
+            self.broadcaster_config = broadcasters.get(broadcaster_id, {})
+        else:
+            self.broadcaster_config = {}
+
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("配信者編集" if broadcaster_id else "配信者追加")
+        self.dialog.geometry("400x300")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        self.setup_dialog()
+
+    def setup_dialog(self):
+        """ダイアログセットアップ"""
+        main_frame = ttk.Frame(self.dialog, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 基本情報
+        ttk.Label(main_frame, text="配信者ID:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.broadcaster_id_var = tk.StringVar(value=self.broadcaster_config.get("broadcaster_id", ""))
+        ttk.Entry(main_frame, textvariable=self.broadcaster_id_var, width=30).grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
+
+        ttk.Label(main_frame, text="配信者名:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.broadcaster_name_var = tk.StringVar(value=self.broadcaster_config.get("broadcaster_name", ""))
+        ttk.Entry(main_frame, textvariable=self.broadcaster_name_var, width=30).grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
+
+        self.enabled_var = tk.BooleanVar(value=self.broadcaster_config.get("enabled", True))
+        ttk.Checkbutton(main_frame, text="有効", variable=self.enabled_var).grid(row=2, column=1, sticky=tk.W, padx=(5, 0), pady=5)
+
+        # 定型メッセージ
+        ttk.Label(main_frame, text="定型メッセージ:").grid(row=3, column=0, sticky=tk.NW, pady=5)
+        self.messages_text = tk.Text(main_frame, height=4, width=30)
+        self.messages_text.grid(row=3, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0), pady=5)
+
+        # デフォルトメッセージを設定
+        default_messages = self.broadcaster_config.get("default_response", {}).get("messages", [])
+        if default_messages:
+            self.messages_text.insert("1.0", "\n".join(default_messages))
+        else:
+            broadcaster_name = self.broadcaster_config.get("broadcaster_name", "")
+            if broadcaster_name:
+                self.messages_text.insert("1.0", f">>{'{no}'} {broadcaster_name}での挨拶です")
+
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(3, weight=1)
+
+        # ボタン
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+
+        ttk.Button(button_frame, text="保存", command=self.save_broadcaster).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="キャンセル", command=self.cancel).pack(side=tk.LEFT)
+
+    def save_broadcaster(self):
+        """配信者保存"""
+        broadcaster_id = self.broadcaster_id_var.get().strip()
+        broadcaster_name = self.broadcaster_name_var.get().strip()
+
+        if not broadcaster_id:
+            log_to_gui("配信者IDを入力してください")
+            return
+        if not broadcaster_name:
+            broadcaster_name = f"配信者{broadcaster_id}"
+
+        # メッセージを処理
+        messages_text = self.messages_text.get("1.0", tk.END).strip()
+        messages = [msg.strip() for msg in messages_text.split("\n") if msg.strip()]
+        if not messages:
+            messages = [f">>{'{no}'} {broadcaster_name}での挨拶です"]
+
+        # 設定を作成
+        broadcaster_config = {
+            "broadcaster_id": broadcaster_id,
+            "broadcaster_name": broadcaster_name,
+            "enabled": self.enabled_var.get(),
+            "default_response": {
+                "response_type": "predefined",
+                "messages": messages,
+                "ai_response_prompt": f"{broadcaster_name}の配信に特化した親しみやすい返答をしてください",
+                "max_reactions_per_stream": 1,
+                "response_delay_seconds": 0
+            },
+            "triggers": self.broadcaster_config.get("triggers", [])
+        }
+
+        self.config_manager.save_broadcaster_config(self.user_id, broadcaster_id, broadcaster_config)
+        self.result = True
+        self.dialog.destroy()
+
+    def cancel(self):
+        self.dialog.destroy()
+
+
+class SimpleTriggerEditDialog:
+    """トリガー追加用の簡単なダイアログ"""
+    def __init__(self, parent, config_manager, user_id, broadcaster_id, broadcaster_name, trigger_index=None):
+        self.result = False
+        self.config_manager = config_manager
+        self.user_id = user_id
+        self.broadcaster_id = broadcaster_id
+        self.broadcaster_name = broadcaster_name
+        self.trigger_index = trigger_index
+
+        # 既存のトリガー設定を取得（編集の場合）
+        if trigger_index is not None:
+            user_config = config_manager.get_user_config(user_id)
+            broadcasters = user_config.get("broadcasters", {})
+            broadcaster_info = broadcasters.get(broadcaster_id, {})
+            triggers = broadcaster_info.get("triggers", [])
+            if 0 <= trigger_index < len(triggers):
+                self.trigger_config = triggers[trigger_index]
+            else:
+                self.trigger_config = {}
+        else:
+            self.trigger_config = {}
+
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("トリガー編集" if trigger_index is not None else "トリガー追加")
+        self.dialog.geometry("500x400")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        self.setup_dialog()
+
+    def setup_dialog(self):
+        """ダイアログセットアップ"""
+        main_frame = ttk.Frame(self.dialog, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 基本情報
+        ttk.Label(main_frame, text="トリガー名:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.trigger_name_var = tk.StringVar(value=self.trigger_config.get("name", ""))
+        ttk.Entry(main_frame, textvariable=self.trigger_name_var, width=40).grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
+
+        self.enabled_var = tk.BooleanVar(value=self.trigger_config.get("enabled", True))
+        ttk.Checkbutton(main_frame, text="有効", variable=self.enabled_var).grid(row=1, column=1, sticky=tk.W, padx=(5, 0), pady=5)
+
+        # キーワード
+        ttk.Label(main_frame, text="キーワード (1行1キーワード):").grid(row=2, column=0, sticky=tk.NW, pady=5)
+        self.keywords_text = tk.Text(main_frame, height=4, width=40)
+        self.keywords_text.grid(row=2, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0), pady=5)
+        keywords = self.trigger_config.get("keywords", [])
+        if keywords:
+            self.keywords_text.insert("1.0", "\n".join(keywords))
+
+        # 応答タイプ
+        ttk.Label(main_frame, text="応答タイプ:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.response_type_var = tk.StringVar(value=self.trigger_config.get("response_type", "predefined"))
+        response_frame = ttk.Frame(main_frame)
+        response_frame.grid(row=3, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
+        ttk.Radiobutton(response_frame, text="定型メッセージ", variable=self.response_type_var, value="predefined").pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Radiobutton(response_frame, text="AI生成", variable=self.response_type_var, value="ai").pack(side=tk.LEFT)
+
+        # メッセージ
+        ttk.Label(main_frame, text="定型メッセージ (1行1メッセージ):").grid(row=4, column=0, sticky=tk.NW, pady=5)
+        self.messages_text = tk.Text(main_frame, height=4, width=40)
+        self.messages_text.grid(row=4, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0), pady=5)
+        messages = self.trigger_config.get("messages", [])
+        if messages:
+            self.messages_text.insert("1.0", "\n".join(messages))
+
+        # AIプロンプト
+        ttk.Label(main_frame, text="AIプロンプト:").grid(row=5, column=0, sticky=tk.W, pady=5)
+        self.ai_prompt_var = tk.StringVar(value=self.trigger_config.get("ai_response_prompt", ""))
+        ttk.Entry(main_frame, textvariable=self.ai_prompt_var, width=40).grid(row=5, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
+
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(2, weight=1)
+        main_frame.rowconfigure(4, weight=1)
+
+        # ボタン
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+
+        ttk.Button(button_frame, text="保存", command=self.save_trigger).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="キャンセル", command=self.cancel).pack(side=tk.LEFT)
+
+    def save_trigger(self):
+        """トリガー保存"""
+        trigger_name = self.trigger_name_var.get().strip()
+        if not trigger_name:
+            log_to_gui("トリガー名を入力してください")
+            return
+
+        # キーワードを処理
+        keywords_text = self.keywords_text.get("1.0", tk.END).strip()
+        keywords = [kw.strip() for kw in keywords_text.split("\n") if kw.strip()]
+        if not keywords:
+            log_to_gui("少なくとも1つのキーワードを入力してください")
+            return
+
+        # メッセージを処理
+        messages_text = self.messages_text.get("1.0", tk.END).strip()
+        messages = [msg.strip() for msg in messages_text.split("\n") if msg.strip()]
+
+        # トリガー設定を作成
+        trigger_config = {
+            "name": trigger_name,
+            "enabled": self.enabled_var.get(),
+            "keywords": keywords,
+            "keyword_condition": "OR",
+            "response_type": self.response_type_var.get(),
+            "messages": messages,
+            "ai_response_prompt": self.ai_prompt_var.get(),
+            "max_reactions_per_stream": 1,
+            "response_delay_seconds": 0,
+            "firing_probability": 100
+        }
+
+        # 配信者の設定を更新
+        user_config = self.config_manager.get_user_config(self.user_id)
+        broadcasters = user_config.get("broadcasters", {})
+
+        if self.broadcaster_id not in broadcasters:
+            log_to_gui("配信者が見つかりません")
+            return
+
+        triggers = broadcasters[self.broadcaster_id].get("triggers", [])
+
+        if self.trigger_index is not None:
+            # 編集の場合
+            if 0 <= self.trigger_index < len(triggers):
+                triggers[self.trigger_index] = trigger_config
+        else:
+            # 新規追加の場合
+            triggers.append(trigger_config)
+
+        broadcasters[self.broadcaster_id]["triggers"] = triggers
+        user_config["broadcasters"] = broadcasters
+        self.config_manager.save_user_config(self.user_id, user_config)
+
+        self.result = True
+        self.dialog.destroy()
+
+    def cancel(self):
+        self.dialog.destroy()
 
 
 def main():

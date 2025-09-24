@@ -90,12 +90,62 @@ class HierarchicalConfigManager:
         return config.get("special_users_config", {}).get("users", {})
 
     def get_user_config(self, user_id: str) -> dict:
-        """特定のユーザー設定を取得"""
+        """特定のユーザー設定を取得（新しい形式を優先）"""
+        # まず新しい場所から読み込みを試行
+        try:
+            user_dirs = self.get_all_user_directories()
+            for user_dir in user_dirs:
+                if user_dir["user_id"] == user_id:
+                    display_name = user_dir["display_name"]
+                    new_config = self.load_user_config_from_directory(user_id, display_name)
+
+                    # 旧形式との互換性のために変換
+                    return {
+                        "user_id": user_id,
+                        "display_name": display_name,
+                        "description": new_config.get("user_info", {}).get("description", ""),
+                        "tags": new_config.get("user_info", {}).get("tags", []),
+                        "ai_analysis": new_config.get("ai_analysis", {}),
+                        "default_response": new_config.get("default_response", {}),
+                        "broadcasters": new_config.get("broadcasters", {}),
+                        "special_triggers": new_config.get("special_triggers", []),
+                        "metadata": new_config.get("metadata", {})
+                    }
+        except Exception as e:
+            print(f"新しい形式での読み込みエラー ({user_id}): {str(e)}")
+
+        # フォールバック：旧形式から読み込み
         users = self.get_all_special_users()
         return users.get(user_id, self.create_default_user_config(user_id))
 
     def save_user_config(self, user_id: str, user_config: dict):
-        """ユーザー設定を保存"""
+        """ユーザー設定を保存（新しい形式に移行）"""
+        # display_nameを取得
+        display_name = user_config.get("display_name", f"ユーザー{user_id}")
+
+        # 新しい形式に変換
+        new_config = {
+            "user_info": {
+                "user_id": user_id,
+                "display_name": display_name,
+                "description": user_config.get("description", ""),
+                "tags": user_config.get("tags", [])
+            },
+            "ai_analysis": user_config.get("ai_analysis", {
+                "enabled": True,
+                "model": "openai-gpt4o",
+                "use_default_prompt": True,
+                "custom_prompt": ""
+            }),
+            "default_response": user_config.get("default_response", {}),
+            "broadcasters": user_config.get("broadcasters", {}),
+            "special_triggers": user_config.get("special_triggers", []),
+        }
+
+        # 新しい場所に保存
+        self.save_user_config_to_directory(user_id, display_name, new_config)
+
+        # 互換性のため、一時的にグローバル設定にも保存
         config = self.load_global_config()
         if "special_users_config" not in config:
             config["special_users_config"] = {"users": {}}
@@ -367,6 +417,160 @@ class HierarchicalConfigManager:
         """XMLが処理済みかチェック"""
         processed_list = self.load_processed_xmls()
         return xml_path in processed_list
+
+    # === 新しいスペシャルユーザーディレクトリ配下の設定管理 ===
+
+    def get_user_directory_path(self, user_id: str, display_name: str = None) -> Path:
+        """ユーザーディレクトリのパスを取得"""
+        if display_name:
+            dir_name = f"{user_id}_{display_name}"
+        else:
+            # display_nameがない場合は既存設定から取得を試行
+            try:
+                user_config = self.get_user_config(user_id)
+                display_name = user_config.get("display_name", f"ユーザー{user_id}")
+                dir_name = f"{user_id}_{display_name}"
+            except:
+                dir_name = f"{user_id}_Unknown"
+
+        return Path("SpecialUser") / dir_name
+
+    def get_user_config_path(self, user_id: str, display_name: str = None) -> Path:
+        """ユーザー設定ファイルのパスを取得"""
+        return self.get_user_directory_path(user_id, display_name) / "config.json"
+
+    def load_user_config_from_directory(self, user_id: str, display_name: str = None) -> dict:
+        """スペシャルユーザーディレクトリから設定を読み込み"""
+        config_path = self.get_user_config_path(user_id, display_name)
+
+        if config_path.exists():
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"ユーザー設定読み込みエラー ({config_path}): {str(e)}")
+
+        # デフォルト設定を返す
+        return self.create_default_user_config_structure(user_id, display_name)
+
+    def save_user_config_to_directory(self, user_id: str, display_name: str, user_config: dict):
+        """スペシャルユーザーディレクトリに設定を保存"""
+        user_dir = self.get_user_directory_path(user_id, display_name)
+        config_path = self.get_user_config_path(user_id, display_name)
+
+        # ディレクトリを作成
+        user_dir.mkdir(parents=True, exist_ok=True)
+
+        # メタデータを更新
+        user_config["metadata"] = {
+            "created_at": user_config.get("metadata", {}).get("created_at", datetime.now().isoformat()),
+            "updated_at": datetime.now().isoformat(),
+            "config_version": "5.0"
+        }
+
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(user_config, f, ensure_ascii=False, indent=2)
+            print(f"ユーザー設定保存: {config_path}")
+        except Exception as e:
+            print(f"ユーザー設定保存エラー ({config_path}): {str(e)}")
+
+    def create_default_user_config_structure(self, user_id: str, display_name: str = None) -> dict:
+        """新しい形式のデフォルトユーザー設定を作成"""
+        if not display_name:
+            display_name = f"ユーザー{user_id}"
+
+        # グローバル設定からデフォルト値を取得
+        global_config = self.load_global_config()
+        default_user_config = global_config.get("default_user_config", {})
+
+        return {
+            "user_info": {
+                "user_id": user_id,
+                "display_name": display_name,
+                "description": "",
+                "tags": []
+            },
+            "ai_analysis": {
+                "enabled": True,
+                "model": global_config.get("default_analysis_model", "openai-gpt4o"),
+                "use_default_prompt": True,
+                "custom_prompt": ""
+            },
+            "default_response": {
+                "response_type": default_user_config.get("response_type", "predefined"),
+                "messages": default_user_config.get("messages", [f">>{'{no}'} こんにちは、{display_name}さん"]),
+                "ai_response_prompt": default_user_config.get("ai_response_prompt", f"{display_name}として親しみやすく挨拶してください"),
+                "max_reactions_per_stream": default_user_config.get("max_reactions_per_stream", 1),
+                "response_delay_seconds": default_user_config.get("response_delay_seconds", 0)
+            },
+            "broadcasters": {},
+            "special_triggers": [],
+            "metadata": {
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "config_version": "5.0"
+            }
+        }
+
+    def migrate_user_from_global_config(self, user_id: str):
+        """グローバル設定からユーザー個別設定に移行"""
+        # 既存のユーザー設定を取得
+        old_user_config = self.get_user_config(user_id)
+        display_name = old_user_config.get("display_name", f"ユーザー{user_id}")
+
+        # 新しい形式に変換
+        new_config = {
+            "user_info": {
+                "user_id": user_id,
+                "display_name": display_name,
+                "description": old_user_config.get("description", ""),
+                "tags": old_user_config.get("tags", [])
+            },
+            "ai_analysis": old_user_config.get("ai_analysis", {
+                "enabled": True,
+                "model": "openai-gpt4o",
+                "use_default_prompt": True,
+                "custom_prompt": ""
+            }),
+            "default_response": old_user_config.get("default_response", {}),
+            "broadcasters": old_user_config.get("broadcasters", {}),
+            "special_triggers": old_user_config.get("special_triggers", []),
+            "metadata": {
+                "created_at": old_user_config.get("metadata", {}).get("created_at", datetime.now().isoformat()),
+                "updated_at": datetime.now().isoformat(),
+                "config_version": "5.0",
+                "migrated_from_global": True
+            }
+        }
+
+        # 新しい場所に保存
+        self.save_user_config_to_directory(user_id, display_name, new_config)
+
+        return new_config
+
+    def get_all_user_directories(self) -> list:
+        """すべてのスペシャルユーザーディレクトリを取得"""
+        special_user_root = Path("SpecialUser")
+        if not special_user_root.exists():
+            return []
+
+        user_dirs = []
+        for item in special_user_root.iterdir():
+            if item.is_dir() and "_" in item.name:
+                try:
+                    user_id_part = item.name.split("_")[0]
+                    display_name_part = "_".join(item.name.split("_")[1:])
+                    user_dirs.append({
+                        "user_id": user_id_part,
+                        "display_name": display_name_part,
+                        "directory_name": item.name,
+                        "path": item
+                    })
+                except:
+                    continue
+
+        return user_dirs
 
 # 既存コードとの互換性
 NCVSpecialConfigManager = HierarchicalConfigManager

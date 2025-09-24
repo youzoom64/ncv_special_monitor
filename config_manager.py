@@ -40,6 +40,30 @@ class HierarchicalConfigManager:
             "special_users_config": {
                 "users": {}
             },
+            "default_broadcaster_config": {
+                "response_type": "predefined",
+                "messages": [
+                    ">>{{no}} こんにちは、{{broadcaster_name}}さん！",
+                    ">>{{no}} {{broadcaster_name}}さんの配信楽しみにしてました！",
+                    ">>{{no}} おつかれさまでした！"
+                ],
+                "ai_response_prompt": "{{broadcaster_name}}の配信に特化した親しみやすい返答をしてください",
+                "max_reactions_per_stream": 1,
+                "response_delay_seconds": 0
+            },
+            "default_user_config": {
+                "description": "{{display_name}}さんの監視設定",
+                "default_response": {
+                    "response_type": "predefined",
+                    "messages": [
+                        ">>{{no}} こんにちは、{{display_name}}さん！",
+                        ">>{{no}} {{display_name}}さん、お疲れ様です！"
+                    ],
+                    "ai_response_prompt": "{{display_name}}として親しみやすく挨拶してください",
+                    "max_reactions_per_stream": 1,
+                    "response_delay_seconds": 0
+                }
+            },
             "last_updated": datetime.now().isoformat()
         }
 
@@ -94,14 +118,37 @@ class HierarchicalConfigManager:
             self.save_global_config(config)
 
     def create_default_user_config(self, user_id: str, display_name: str = None) -> dict:
-        """デフォルトユーザー設定を作成"""
+        """デフォルトユーザー設定を作成（グローバル設定を使用）"""
         if display_name is None:
             display_name = f"ユーザー{user_id}"
+
+        # グローバル設定からデフォルト値を取得
+        global_config = self.load_global_config()
+        default_user = global_config.get("default_user_config", {})
+
+        # 説明文の置換
+        description = default_user.get("description", "")
+        description = description.replace("{{display_name}}", display_name)
+
+        # デフォルトレスポンス設定
+        default_response = default_user.get("default_response", {})
+
+        # メッセージテンプレートを実際の名前で置換
+        default_messages = default_response.get("messages", [f">>{'{no}'} こんにちは、{display_name}さん"])
+        processed_messages = []
+        for message in default_messages:
+            processed_message = message.replace("{{display_name}}", display_name)
+            processed_message = processed_message.replace("{{no}}", "{no}")
+            processed_messages.append(processed_message)
+
+        # AI応答プロンプトも置換
+        ai_prompt = default_response.get("ai_response_prompt", f"{display_name}として親しみやすく挨拶してください")
+        ai_prompt = ai_prompt.replace("{{display_name}}", display_name)
 
         return {
             "user_id": user_id,
             "display_name": display_name,
-            "description": "",
+            "description": description,
             "tags": [],
             "ai_analysis": {
                 "enabled": True,
@@ -110,11 +157,11 @@ class HierarchicalConfigManager:
                 "use_default_prompt": True
             },
             "default_response": {
-                "response_type": "predefined",
-                "messages": [f">>{'{no}'} こんにちは、{display_name}さん"],
-                "ai_response_prompt": f"{display_name}として親しみやすく挨拶してください",
-                "max_reactions_per_stream": 1,
-                "response_delay_seconds": 0
+                "response_type": default_response.get("response_type", "predefined"),
+                "messages": processed_messages,
+                "ai_response_prompt": ai_prompt,
+                "max_reactions_per_stream": default_response.get("max_reactions_per_stream", 1),
+                "response_delay_seconds": default_response.get("response_delay_seconds", 0)
             },
             "special_triggers": [],
             "broadcasters": {},
@@ -149,20 +196,37 @@ class HierarchicalConfigManager:
             self.save_user_config(user_id, user_config)
 
     def create_default_broadcaster_config(self, broadcaster_id: str, broadcaster_name: str = None) -> dict:
-        """デフォルト配信者設定を作成"""
+        """デフォルト配信者設定を作成（グローバル設定を使用）"""
         if broadcaster_name is None:
             broadcaster_name = f"配信者{broadcaster_id}"
+
+        # グローバル設定からデフォルト値を取得
+        global_config = self.load_global_config()
+        default_broadcaster = global_config.get("default_broadcaster_config", {})
+
+        # メッセージテンプレートを実際の配信者名で置換
+        default_messages = default_broadcaster.get("messages", [f">>{'{no}'} {broadcaster_name}での挨拶です"])
+        processed_messages = []
+        for message in default_messages:
+            # {{broadcaster_name}} を実際の配信者名に置換
+            processed_message = message.replace("{{broadcaster_name}}", broadcaster_name)
+            processed_message = processed_message.replace("{{no}}", "{no}")
+            processed_messages.append(processed_message)
+
+        # AI応答プロンプトも置換
+        ai_prompt = default_broadcaster.get("ai_response_prompt", f"{broadcaster_name}の配信に特化した親しみやすい返答をしてください")
+        ai_prompt = ai_prompt.replace("{{broadcaster_name}}", broadcaster_name)
 
         return {
             "broadcaster_id": broadcaster_id,
             "broadcaster_name": broadcaster_name,
             "enabled": True,
             "default_response": {
-                "response_type": "predefined",
-                "messages": [f">>{'{no}'} {broadcaster_name}での挨拶です"],
-                "ai_response_prompt": f"{broadcaster_name}の配信に特化した親しみやすい返答をしてください",
-                "max_reactions_per_stream": 1,
-                "response_delay_seconds": 0
+                "response_type": default_broadcaster.get("response_type", "predefined"),
+                "messages": processed_messages,
+                "ai_response_prompt": ai_prompt,
+                "max_reactions_per_stream": default_broadcaster.get("max_reactions_per_stream", 1),
+                "response_delay_seconds": default_broadcaster.get("response_delay_seconds", 0)
             },
             "triggers": []
         }
@@ -226,7 +290,8 @@ class HierarchicalConfigManager:
             "ai_response_prompt": "親しみやすく挨拶してください",
             "max_reactions_per_stream": 1,
             "response_delay_seconds": 0,
-            "cooldown_minutes": 30
+            "cooldown_minutes": 30,
+            "firing_probability": 100
         }
 
     # スペシャルトリガー管理

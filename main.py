@@ -7,6 +7,8 @@ from bs4 import BeautifulSoup
 import json
 import time
 from datetime import datetime
+import webbrowser
+import tempfile
 
 from config_manager import HierarchicalConfigManager
 from logger import NCVSpecialLogger
@@ -140,6 +142,62 @@ class NCVSpecialMonitorGUI:
         self.split_delay_var = tk.StringVar()
         ttk.Entry(response_settings_frame, textvariable=self.split_delay_var, width=10).grid(row=0, column=3, padx=(5, 0))
 
+        # デフォルト配信者設定
+        default_broadcaster_frame = ttk.LabelFrame(left_frame, text="デフォルト配信者設定", padding="5")
+        default_broadcaster_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        # ヘルプボタン付きのヘッダー
+        header_frame = ttk.Frame(default_broadcaster_frame)
+        header_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        ttk.Label(header_frame, text="デフォルトメッセージ (1行1メッセージ):").pack(side=tk.LEFT)
+        ttk.Button(header_frame, text="ヘルプ", command=self.show_broadcaster_help, width=8).pack(side=tk.RIGHT)
+        self.default_messages_text = tk.Text(default_broadcaster_frame, height=4, width=50)
+        self.default_messages_text.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(2, 5))
+
+        ttk.Label(default_broadcaster_frame, text="AI応答プロンプト:").grid(row=2, column=0, sticky=tk.W)
+        self.default_ai_prompt_var = tk.StringVar()
+        ttk.Entry(default_broadcaster_frame, textvariable=self.default_ai_prompt_var, width=50).grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(2, 5))
+
+        settings_frame = ttk.Frame(default_broadcaster_frame)
+        settings_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E))
+
+        ttk.Label(settings_frame, text="最大反応数:").grid(row=0, column=0, sticky=tk.W)
+        self.default_max_reactions_var = tk.StringVar()
+        ttk.Entry(settings_frame, textvariable=self.default_max_reactions_var, width=10).grid(row=0, column=1, padx=(5, 10))
+
+        ttk.Label(settings_frame, text="遅延秒数:").grid(row=0, column=2, sticky=tk.W)
+        self.default_response_delay_var = tk.StringVar()
+        ttk.Entry(settings_frame, textvariable=self.default_response_delay_var, width=10).grid(row=0, column=3, padx=(5, 0))
+
+        # デフォルトユーザー設定
+        default_user_frame = ttk.LabelFrame(left_frame, text="デフォルトユーザー設定", padding="5")
+        default_user_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=(5, 5))
+
+        # ヘルプボタン付きのヘッダー
+        user_header_frame = ttk.Frame(default_user_frame)
+        user_header_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        ttk.Label(user_header_frame, text="デフォルトメッセージ (1行1メッセージ):").pack(side=tk.LEFT)
+        ttk.Button(user_header_frame, text="ヘルプ", command=self.show_user_help, width=8).pack(side=tk.RIGHT)
+        self.default_user_messages_text = tk.Text(default_user_frame, height=4, width=50)
+        self.default_user_messages_text.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(2, 5))
+
+        ttk.Label(default_user_frame, text="AI応答プロンプト:").grid(row=2, column=0, sticky=tk.W)
+        self.default_user_ai_prompt_var = tk.StringVar()
+        ttk.Entry(default_user_frame, textvariable=self.default_user_ai_prompt_var, width=50).grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(2, 5))
+
+        user_settings_frame = ttk.Frame(default_user_frame)
+        user_settings_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E))
+
+        ttk.Label(user_settings_frame, text="最大反応数:").grid(row=0, column=0, sticky=tk.W)
+        self.default_user_max_reactions_var = tk.StringVar()
+        ttk.Entry(user_settings_frame, textvariable=self.default_user_max_reactions_var, width=10).grid(row=0, column=1, padx=(5, 10))
+
+        ttk.Label(user_settings_frame, text="遅延秒数:").grid(row=0, column=2, sticky=tk.W)
+        self.default_user_response_delay_var = tk.StringVar()
+        ttk.Entry(user_settings_frame, textvariable=self.default_user_response_delay_var, width=10).grid(row=0, column=3, padx=(5, 0))
+
         # スペシャルユーザー設定
         users_frame = ttk.LabelFrame(right_frame, text="スペシャルユーザー設定", padding="5")
         users_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
@@ -181,7 +239,7 @@ class NCVSpecialMonitorGUI:
 
         # 制御ボタン
         control_frame = ttk.Frame(left_frame)
-        control_frame.grid(row=4, column=0, pady=(5, 0))
+        control_frame.grid(row=6, column=0, pady=(5, 0))
 
         self.start_button = ttk.Button(control_frame, text="監視開始", command=self.start_monitoring)
         self.start_button.grid(row=0, column=0, padx=(0, 5))
@@ -225,6 +283,7 @@ class NCVSpecialMonitorGUI:
         # log_frame.rowconfigure(0, weight=1) を削除 - 縦は固定
         api_frame.columnconfigure(1, weight=1)
         ncv_frame.columnconfigure(1, weight=1)
+        default_broadcaster_frame.columnconfigure(0, weight=1)
 
     def browse_ncv_folder(self):
         folder = filedialog.askdirectory()
@@ -251,6 +310,27 @@ class NCVSpecialMonitorGUI:
         self.response_api_key_var.set(api_settings.get("response_api_key", ""))
         self.max_chars_var.set(str(api_settings.get("response_max_characters", 100)))
         self.split_delay_var.set(str(api_settings.get("response_split_delay_seconds", 1)))
+
+        # デフォルト配信者設定
+        default_broadcaster = config.get("default_broadcaster_config", {})
+        default_messages = default_broadcaster.get("messages", [])
+        self.default_messages_text.delete(1.0, tk.END)
+        self.default_messages_text.insert(1.0, "\n".join(default_messages))
+
+        self.default_ai_prompt_var.set(default_broadcaster.get("ai_response_prompt", "{{broadcaster_name}}の配信に特化した親しみやすい返答をしてください"))
+        self.default_max_reactions_var.set(str(default_broadcaster.get("max_reactions_per_stream", 1)))
+        self.default_response_delay_var.set(str(default_broadcaster.get("response_delay_seconds", 0)))
+
+        # デフォルトユーザー設定
+        default_user = config.get("default_user_config", {})
+        default_user_messages = default_user.get("default_response", {}).get("messages", [])
+        self.default_user_messages_text.delete(1.0, tk.END)
+        self.default_user_messages_text.insert(1.0, "\n".join(default_user_messages))
+
+        default_response = default_user.get("default_response", {})
+        self.default_user_ai_prompt_var.set(default_response.get("ai_response_prompt", "{{display_name}}として親しみやすく挨拶してください"))
+        self.default_user_max_reactions_var.set(str(default_response.get("max_reactions_per_stream", 1)))
+        self.default_user_response_delay_var.set(str(default_response.get("response_delay_seconds", 0)))
 
         # ユーザー一覧を更新
         self.refresh_users_list()
@@ -358,6 +438,33 @@ class NCVSpecialMonitorGUI:
 
             config["api_settings"] = api_settings
 
+            # デフォルト配信者設定
+            messages_text = self.default_messages_text.get(1.0, tk.END).strip()
+            default_messages = [line.strip() for line in messages_text.split("\n") if line.strip()]
+
+            config["default_broadcaster_config"] = {
+                "response_type": "predefined",
+                "messages": default_messages,
+                "ai_response_prompt": self.default_ai_prompt_var.get(),
+                "max_reactions_per_stream": int(self.default_max_reactions_var.get() or 1),
+                "response_delay_seconds": int(self.default_response_delay_var.get() or 0)
+            }
+
+            # デフォルトユーザー設定
+            user_messages_text = self.default_user_messages_text.get(1.0, tk.END).strip()
+            default_user_messages = [line.strip() for line in user_messages_text.split("\n") if line.strip()]
+
+            config["default_user_config"] = {
+                "description": "{{display_name}}さんの監視設定",
+                "default_response": {
+                    "response_type": "predefined",
+                    "messages": default_user_messages,
+                    "ai_response_prompt": self.default_user_ai_prompt_var.get(),
+                    "max_reactions_per_stream": int(self.default_user_max_reactions_var.get() or 1),
+                    "response_delay_seconds": int(self.default_user_response_delay_var.get() or 0)
+                }
+            }
+
             self.config_manager.save_global_config(config)
             # 設定保存の詳細ログ
             special_users = self.config_manager.get_all_special_users()
@@ -413,6 +520,386 @@ class NCVSpecialMonitorGUI:
 
         except Exception as e:
             self.log_message(f"監視停止エラー: {str(e)}")
+
+    def show_broadcaster_help(self):
+        """配信者設定ヘルプをHTMLで表示"""
+        html_content = """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>デフォルト配信者設定ヘルプ</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; border-left: 4px solid #3498db; padding-left: 10px; }
+        .placeholder {
+            background: #e8f4fd;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+            margin: 10px 0;
+        }
+        .example {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+            margin: 10px 0;
+        }
+        .before { color: #e74c3c; }
+        .after { color: #27ae60; }
+        code {
+            background: #f1f2f6;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📋 デフォルト配信者設定ヘルプ</h1>
+
+        <h2>🔄 置換プレースホルダー</h2>
+        <p>メッセージとAI応答プロンプトで使用できる特別な置換文字列です。</p>
+
+        <table>
+            <tr>
+                <th>プレースホルダー</th>
+                <th>置換内容</th>
+                <th>説明</th>
+            </tr>
+            <tr>
+                <td><code>{{broadcaster_name}}</code></td>
+                <td>配信者の実際の名前</td>
+                <td>「花子」「太郎」など、配信者ごとに自動で置き換わります</td>
+            </tr>
+            <tr>
+                <td><code>{{display_name}}</code></td>
+                <td>スペシャルユーザーの表示名</td>
+                <td>監視中のスペシャルユーザーの名前に置き換わります</td>
+            </tr>
+            <tr>
+                <td><code>{{no}}</code></td>
+                <td>実際のコメント番号</td>
+                <td>「>>184」のように、実行時に具体的なコメント番号に置き換わります</td>
+            </tr>
+        </table>
+
+        <h2>💬 メッセージ設定例</h2>
+
+        <div class="example">
+            <strong>設定内容（テンプレート）:</strong>
+            <pre>
+>>{{no}} こんにちは、{{broadcaster_name}}さん！
+>>{{no}} {{broadcaster_name}}さんの配信楽しみにしてました！
+>>{{no}} {{display_name}}がお疲れ様でした！
+            </pre>
+        </div>
+
+        <div class="example">
+            <strong>配信者「花子」、スペシャルユーザー「太郎」の場合の実際の出力:</strong>
+            <pre>
+>>184 こんにちは、花子さん！
+>>185 花子さんの配信楽しみにしてました！
+>>186 太郎がお疲れ様でした！
+            </pre>
+        </div>
+
+        <h2>🤖 AI応答プロンプト例</h2>
+
+        <div class="example">
+            <strong>設定内容:</strong><br>
+            <code>{{broadcaster_name}}の配信で{{display_name}}として親しみやすい返答をしてください</code>
+        </div>
+
+        <div class="example">
+            <strong>実際のAIへの指示:</strong><br>
+            <code>花子の配信で太郎として親しみやすい返答をしてください</code>
+        </div>
+
+        <h2>⚙️ その他の設定</h2>
+
+        <table>
+            <tr>
+                <th>項目</th>
+                <th>説明</th>
+                <th>推奨値</th>
+            </tr>
+            <tr>
+                <td>最大反応数</td>
+                <td>1つの配信で何回まで反応するか</td>
+                <td>1-3回</td>
+            </tr>
+            <tr>
+                <td>遅延秒数</td>
+                <td>コメント受信から反応までの待機時間</td>
+                <td>0-5秒</td>
+            </tr>
+        </table>
+
+        <div class="warning">
+            <strong>⚠️ 注意:</strong> グローバル設定は新しく追加する配信者にのみ適用されます。既存の配信者の設定は変更されません。
+        </div>
+
+        <h2>🚀 活用のコツ</h2>
+        <ul>
+            <li><strong>汎用的なメッセージ</strong>を設定しておくことで、どの配信者にも適用できます</li>
+            <li><strong>{{broadcaster_name}}</strong>を使って親しみやすい挨拶を作成できます</li>
+            <li><strong>複数のメッセージ</strong>を設定すると、ランダムに選択されて使用されます</li>
+            <li>配信者ごとに特別な設定が必要な場合は、後から個別に編集できます</li>
+        </ul>
+    </div>
+</body>
+</html>
+        """
+
+        try:
+            # 一時HTMLファイルを作成
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
+                f.write(html_content)
+                temp_file = f.name
+
+            # デフォルトブラウザで開く
+            webbrowser.open(f'file://{temp_file}')
+            self.log_message("ヘルプをブラウザで表示しました")
+
+            # 5秒後にファイルを削除（非同期）
+            def cleanup():
+                time.sleep(5)
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+
+            threading.Thread(target=cleanup, daemon=True).start()
+
+        except Exception as e:
+            self.log_message(f"ヘルプ表示エラー: {str(e)}")
+
+    def show_user_help(self):
+        """ユーザー設定ヘルプをHTMLで表示"""
+        html_content = """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>デフォルトユーザー設定ヘルプ</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #2c3e50; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; border-left: 4px solid #e74c3c; padding-left: 10px; }
+        .placeholder {
+            background: #fdf2f2;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #e74c3c;
+            margin: 10px 0;
+        }
+        .example {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+            margin: 10px 0;
+        }
+        .before { color: #e74c3c; }
+        .after { color: #27ae60; }
+        code {
+            background: #f1f2f6;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>👤 デフォルトユーザー設定ヘルプ</h1>
+
+        <h2>🔄 置換プレースホルダー</h2>
+        <p>メッセージとAI応答プロンプトで使用できる特別な置換文字列です。</p>
+
+        <table>
+            <tr>
+                <th>プレースホルダー</th>
+                <th>置換内容</th>
+                <th>説明</th>
+            </tr>
+            <tr>
+                <td><code>{{display_name}}</code></td>
+                <td>ユーザーの表示名</td>
+                <td>「花子」「太郎」など、スペシャルユーザーごとに自動で置き換わります</td>
+            </tr>
+            <tr>
+                <td><code>{{no}}</code></td>
+                <td>実際のコメント番号</td>
+                <td>「>>184」のように、実行時に具体的なコメント番号に置き換わります</td>
+            </tr>
+        </table>
+
+        <h2>💬 メッセージ設定例</h2>
+
+        <div class="example">
+            <strong>設定内容（テンプレート）:</strong>
+            <pre>
+>>{{no}} こんにちは、{{display_name}}さん！
+>>{{no}} {{display_name}}さん、お疲れ様です！
+>>{{no}} {{display_name}}さんの投稿いつも楽しみにしています！
+            </pre>
+        </div>
+
+        <div class="example">
+            <strong>ユーザー「花子」の場合の実際の出力:</strong>
+            <pre>
+>>184 こんにちは、花子さん！
+>>185 花子さん、お疲れ様です！
+>>186 花子さんの投稿いつも楽しみにしています！
+            </pre>
+        </div>
+
+        <h2>🤖 AI応答プロンプト例</h2>
+
+        <div class="example">
+            <strong>設定内容:</strong><br>
+            <code>{{display_name}}として親しみやすく挨拶してください</code>
+        </div>
+
+        <div class="example">
+            <strong>実際のAIへの指示:</strong><br>
+            <code>花子として親しみやすく挨拶してください</code>
+        </div>
+
+        <h2>⚙️ その他の設定</h2>
+
+        <table>
+            <tr>
+                <th>項目</th>
+                <th>説明</th>
+                <th>推奨値</th>
+            </tr>
+            <tr>
+                <td>最大反応数</td>
+                <td>1つの配信で何回まで反応するか</td>
+                <td>1-3回</td>
+            </tr>
+            <tr>
+                <td>遅延秒数</td>
+                <td>コメント受信から反応までの待機時間</td>
+                <td>0-5秒</td>
+            </tr>
+        </table>
+
+        <div class="warning">
+            <strong>⚠️ 注意:</strong> グローバル設定は新しく追加するスペシャルユーザーにのみ適用されます。既存のユーザー設定は変更されません。
+        </div>
+
+        <h2>🚀 活用のコツ</h2>
+        <ul>
+            <li><strong>汎用的なメッセージ</strong>を設定しておくことで、どのスペシャルユーザーにも適用できます</li>
+            <li><strong>{{display_name}}</strong>を使って親しみやすいメッセージを作成できます</li>
+            <li><strong>複数のメッセージ</strong>を設定すると、ランダムに選択されて使用されます</li>
+            <li>ユーザーごとに特別な設定が必要な場合は、後から個別に編集できます</li>
+            <li>このデフォルト設定は、配信者固有のトリガーがない場合の<strong>基本応答</strong>として使用されます</li>
+        </ul>
+    </div>
+</body>
+</html>
+        """
+
+        try:
+            # 一時HTMLファイルを作成
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
+                f.write(html_content)
+                temp_file = f.name
+
+            # デフォルトブラウザで開く
+            webbrowser.open(f'file://{temp_file}')
+            self.log_message("ユーザー設定ヘルプをブラウザで表示しました")
+
+            # 5秒後にファイルを削除（非同期）
+            def cleanup():
+                time.sleep(5)
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+
+            threading.Thread(target=cleanup, daemon=True).start()
+
+        except Exception as e:
+            self.log_message(f"ヘルプ表示エラー: {str(e)}")
 
 
 class UserEditDialog:
@@ -1287,7 +1774,11 @@ class TriggerEditDialog:
 
         ttk.Label(detail_frame, text="クールダウン(分):").grid(row=0, column=4, sticky=tk.W)
         self.cooldown_var = tk.StringVar(value=str(self.trigger_config.get("cooldown_minutes", 30)))
-        ttk.Entry(detail_frame, textvariable=self.cooldown_var, width=10).grid(row=0, column=5, padx=(5, 0))
+        ttk.Entry(detail_frame, textvariable=self.cooldown_var, width=10).grid(row=0, column=5, padx=(5, 10))
+
+        ttk.Label(detail_frame, text="発火確率(%):").grid(row=1, column=0, sticky=tk.W)
+        self.probability_var = tk.StringVar(value=str(self.trigger_config.get("firing_probability", 100)))
+        ttk.Entry(detail_frame, textvariable=self.probability_var, width=10).grid(row=1, column=1, padx=(5, 0))
 
         # ボタン
         button_frame = ttk.Frame(main_frame)
@@ -1329,7 +1820,8 @@ class TriggerEditDialog:
             "ai_response_prompt": self.ai_prompt_var.get(),
             "max_reactions_per_stream": int(self.max_reactions_var.get() or 1),
             "response_delay_seconds": int(self.delay_var.get() or 0),
-            "cooldown_minutes": int(self.cooldown_var.get() or 30)
+            "cooldown_minutes": int(self.cooldown_var.get() or 30),
+            "firing_probability": int(self.probability_var.get() or 100)
         }
 
         self.config_manager.save_trigger_config(self.user_id, self.broadcaster_id, trigger_config)
@@ -1583,7 +2075,8 @@ class SpecialTriggerEditDialog:
                 "response_type": "predefined",
                 "messages": [f">>{'{no}'} 🚨 スペシャルトリガー発動！"],
                 "ai_response_prompt": "緊急事態として迅速に対応してください",
-                "ignore_all_limits": True
+                "ignore_all_limits": True,
+                "firing_probability": 100
             }
 
         self.dialog = tk.Toplevel(parent)

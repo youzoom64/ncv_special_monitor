@@ -220,6 +220,9 @@ class NCVSpecialMonitorGUI:
 
         self.users_tree.grid(row=0, column=0, columnspan=4, sticky=(tk.W, tk.E, tk.N, tk.S))
 
+        # ダブルクリックイベント
+        self.users_tree.bind("<Double-1>", self.on_user_double_click)
+
         # スクロールバー
         users_scrollbar = ttk.Scrollbar(users_frame, orient=tk.VERTICAL, command=self.users_tree.yview)
         users_scrollbar.grid(row=0, column=4, sticky=(tk.N, tk.S))
@@ -232,7 +235,8 @@ class NCVSpecialMonitorGUI:
         ttk.Button(buttons_frame, text="ユーザー追加", command=self.add_special_user).grid(row=0, column=0, padx=(0, 5))
         ttk.Button(buttons_frame, text="ユーザー編集", command=self.edit_special_user).grid(row=0, column=1, padx=(5, 5))
         ttk.Button(buttons_frame, text="ユーザー削除", command=self.remove_special_user).grid(row=0, column=2, padx=(5, 5))
-        ttk.Button(buttons_frame, text="配信者管理", command=self.manage_broadcasters).grid(row=0, column=3, padx=(5, 0))
+        ttk.Button(buttons_frame, text="配信者管理", command=self.manage_broadcasters).grid(row=0, column=3, padx=(5, 5))
+        ttk.Button(buttons_frame, text="シリーズ管理", command=self.manage_trigger_series).grid(row=0, column=4, padx=(5, 0))
 
         # 制御ボタン
         control_frame = ttk.Frame(left_frame)
@@ -379,6 +383,12 @@ class NCVSpecialMonitorGUI:
         if dialog.result:
             self.refresh_users_list()
 
+    def on_user_double_click(self, event):
+        """ユーザー一覧ダブルクリック処理 - ユーザー編集画面を開く"""
+        selected = self.users_tree.selection()
+        if selected:
+            self.edit_special_user()
+
     def remove_special_user(self):
         """ユーザー削除"""
         selected = self.users_tree.selection()
@@ -390,9 +400,30 @@ class NCVSpecialMonitorGUI:
         user_id = values[0]
         display_name = values[1]
 
-        # 確認なしで削除
-        self.config_manager.delete_user_config(user_id)
-        self.refresh_users_list()
+        # 確認ダイアログを表示
+        from tkinter import messagebox
+        result = messagebox.askyesno(
+            "ユーザー削除の確認",
+            f"ユーザー「{display_name}」(ID: {user_id})を削除しますか？\n\n"
+            f"この操作により、以下のデータが完全に削除されます：\n"
+            f"• ユーザー設定\n"
+            f"• 配信者設定\n"
+            f"• トリガー設定\n"
+            f"• スペシャルトリガー設定\n\n"
+            f"この操作は取り消すことができません。",
+            icon='warning'
+        )
+
+        if result:
+            try:
+                self.config_manager.delete_user_config(user_id)
+                self.refresh_users_list()
+                log_to_gui(f"ユーザー「{display_name}」を削除しました")
+            except Exception as e:
+                log_to_gui(f"ユーザー削除エラー: {str(e)}")
+                messagebox.showerror("削除エラー", f"ユーザーの削除に失敗しました:\n{str(e)}")
+        else:
+            log_to_gui("ユーザー削除をキャンセルしました")
 
     def manage_broadcasters(self):
         """配信者管理"""
@@ -409,6 +440,12 @@ class NCVSpecialMonitorGUI:
         self.root.wait_window(dialog.dialog)
         if dialog.result:
             self.refresh_users_list()
+
+    def manage_trigger_series(self):
+        """トリガーシリーズ管理"""
+        from .trigger_series_dialog import TriggerSeriesManagementDialog
+        dialog = TriggerSeriesManagementDialog(self.root, self.config_manager)
+        self.root.wait_window(dialog.dialog)
 
     def save_config(self):
         """設定保存"""

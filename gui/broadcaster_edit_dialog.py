@@ -4,6 +4,8 @@
 import tkinter as tk
 from tkinter import ttk
 import tkinter.messagebox as msgbox
+import requests
+from bs4 import BeautifulSoup
 
 from .utils import log_to_gui
 from .trigger_dialog import TriggerManagementDialog
@@ -50,7 +52,11 @@ class BroadcasterEditDialog:
 
         ttk.Label(basic_frame, text="配信者ID:").grid(row=0, column=0, sticky=tk.W)
         self.broadcaster_id_var = tk.StringVar(value=self.broadcaster_config.get("broadcaster_id", ""))
-        ttk.Entry(basic_frame, textvariable=self.broadcaster_id_var).grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0))
+        broadcaster_id_frame = ttk.Frame(basic_frame)
+        broadcaster_id_frame.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0))
+        self.broadcaster_id_entry = ttk.Entry(broadcaster_id_frame, textvariable=self.broadcaster_id_var)
+        self.broadcaster_id_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(broadcaster_id_frame, text="名前取得", command=self.fetch_broadcaster_name).pack(side=tk.LEFT, padx=(5, 0))
 
         ttk.Label(basic_frame, text="配信者名:").grid(row=1, column=0, sticky=tk.W)
         self.broadcaster_name_var = tk.StringVar(value=self.broadcaster_config.get("broadcaster_name", ""))
@@ -64,6 +70,10 @@ class BroadcasterEditDialog:
         # デフォルト応答設定（配信者用）
         response_frame = ttk.LabelFrame(left_frame, text="この配信者でのデフォルト応答設定", padding="5")
         response_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # デフォルト応答有効/無効チェックボックス
+        self.default_response_enabled_var = tk.BooleanVar(value=self.broadcaster_config.get("default_response", {}).get("enabled", False))
+        ttk.Checkbutton(response_frame, text="デフォルト応答を有効にする", variable=self.default_response_enabled_var).pack(anchor=tk.W, pady=(0, 10))
 
         # 応答タイプ
         type_frame = ttk.Frame(response_frame)
@@ -140,6 +150,7 @@ class BroadcasterEditDialog:
 
         ttk.Button(trigger_button_frame, text="トリガー追加", command=self.add_trigger).pack(side=tk.LEFT, padx=(0, 2))
         ttk.Button(trigger_button_frame, text="削除", command=self.delete_trigger).pack(side=tk.LEFT, padx=(2, 2))
+        ttk.Button(trigger_button_frame, text="シリーズ追加", command=self.add_trigger_series).pack(side=tk.LEFT, padx=(2, 2))
         ttk.Button(trigger_button_frame, text="一括有効", command=self.enable_all_triggers).pack(side=tk.LEFT, padx=(2, 2))
         ttk.Button(trigger_button_frame, text="一括無効", command=self.disable_all_triggers).pack(side=tk.LEFT, padx=(2, 0))
 
@@ -169,6 +180,7 @@ class BroadcasterEditDialog:
             "broadcaster_name": broadcaster_name,
             "enabled": self.enabled_var.get(),
             "default_response": {
+                "enabled": self.default_response_enabled_var.get(),
                 "response_type": self.response_type_var.get(),
                 "messages": messages,
                 "ai_response_prompt": self.ai_prompt_var.get(),
@@ -184,6 +196,37 @@ class BroadcasterEditDialog:
 
     def cancel(self):
         self.dialog.destroy()
+
+    def fetch_broadcaster_name(self):
+        """配信者名取得"""
+        broadcaster_id = self.broadcaster_id_var.get().strip()
+        if not broadcaster_id:
+            log_to_gui("配信者IDを入力してください")
+            return
+
+        try:
+            url = f"https://www.nicovideo.jp/user/{broadcaster_id}"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            response = requests.get(url, headers=headers, timeout=10)
+            response.encoding = "utf-8"
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # ユーザー名を取得
+            nickname = None
+            meta_tag = soup.find("meta", {"property": "profile:username"})
+            if meta_tag and meta_tag.get("content"):
+                nickname = meta_tag["content"]
+
+            if nickname:
+                self.broadcaster_name_var.set(nickname)
+                log_to_gui(f"配信者名を取得しました: {nickname}")
+            else:
+                self.broadcaster_name_var.set(f"配信者{broadcaster_id}")
+                log_to_gui("配信者名を取得できませんでした")
+
+        except Exception as e:
+            self.broadcaster_name_var.set(f"配信者{broadcaster_id}")
+            log_to_gui(f"配信者情報の取得に失敗しました: {str(e)}")
 
     def refresh_triggers_list(self):
         """トリガー一覧を更新"""
@@ -222,7 +265,7 @@ class BroadcasterEditDialog:
             )
 
     def on_trigger_double_click(self, event):
-        """トリガーダブルクリック処理"""
+        """トリガーダブルクリック処理 - 直接トリガー編集画面に遷移"""
         selection = self.triggers_tree.selection()
         if not selection:
             return
@@ -236,8 +279,28 @@ class BroadcasterEditDialog:
         # 配信者名を取得
         broadcaster_name = self.broadcaster_name_var.get().strip() or f"配信者{broadcaster_id}"
 
-        # トリガー管理ダイアログを開く
-        dialog = TriggerManagementDialog(self.dialog, self.config_manager, self.user_id, broadcaster_id, broadcaster_name)
+        # 選択されたトリガーの情報を取得
+        item_values = self.triggers_tree.item(selection[0], "values")
+        trigger_name = item_values[0]
+
+        # トリガーのインデックスを特定
+        user_config = self.config_manager.get_user_config(self.user_id)
+        broadcasters = user_config.get("broadcasters", {})
+        broadcaster_info = broadcasters.get(broadcaster_id, {})
+        triggers = broadcaster_info.get("triggers", [])
+
+        trigger_index = None
+        for i, trigger in enumerate(triggers):
+            if trigger.get("name", "") == trigger_name:
+                trigger_index = i
+                break
+
+        if trigger_index is None:
+            log_to_gui("トリガーが見つかりません")
+            return
+
+        # トリガー編集ダイアログを直接開く
+        dialog = SimpleTriggerEditDialog(self.dialog, self.config_manager, self.user_id, broadcaster_id, broadcaster_name, trigger_index)
         self.dialog.wait_window(dialog.dialog)
 
         # ダイアログが閉じられた後、トリガー一覧を更新
@@ -258,6 +321,61 @@ class BroadcasterEditDialog:
 
         if dialog.result:
             self.refresh_triggers_list()
+
+    def add_trigger_series(self):
+        """トリガーシリーズ追加"""
+        from tkinter import messagebox
+        from .trigger_series_selection_dialog import TriggerSeriesSelectionDialog
+
+        broadcaster_id = self.broadcaster_id or self.broadcaster_id_var.get().strip()
+        if not broadcaster_id:
+            log_to_gui("配信者IDが設定されていません")
+            return
+
+        # シリーズ選択ダイアログ
+        dialog = TriggerSeriesSelectionDialog(self.dialog, self.config_manager)
+        self.dialog.wait_window(dialog.dialog)
+
+        if dialog.result:
+            series_id = dialog.result
+            series_data = self.config_manager.get_trigger_series(series_id)
+            series_name = series_data.get("name", series_id)
+            triggers = series_data.get("triggers", [])
+
+            if not triggers:
+                messagebox.showwarning("警告", f"シリーズ「{series_name}」にはトリガーが含まれていません")
+                return
+
+            # 現在の配信者の設定を取得
+            user_config = self.config_manager.get_user_config(self.user_id)
+            broadcasters = user_config.get("broadcasters", {})
+            broadcaster_config = broadcasters.get(broadcaster_id, {})
+            existing_triggers = broadcaster_config.get("triggers", [])
+
+            # シリーズのトリガーを追加
+            added_count = 0
+            for trigger in triggers:
+                # 同じ名前のトリガーがすでに存在するかチェック
+                trigger_name = trigger.get("name", "")
+                name_exists = any(t.get("name") == trigger_name for t in existing_triggers)
+
+                if not name_exists:
+                    # 新しいトリガーとして追加
+                    new_trigger = trigger.copy()
+                    existing_triggers.append(new_trigger)
+                    added_count += 1
+
+            if added_count > 0:
+                # 設定を保存
+                broadcaster_config["triggers"] = existing_triggers
+                broadcasters[broadcaster_id] = broadcaster_config
+                user_config["broadcasters"] = broadcasters
+                self.config_manager.save_user_config_to_directory(self.user_id, user_config)
+
+                log_to_gui(f"シリーズ「{series_name}」から {added_count} 個のトリガーを追加しました")
+                self.refresh_triggers_list()
+            else:
+                messagebox.showinfo("情報", f"シリーズ「{series_name}」のトリガーはすでにすべて追加済みです")
 
     def delete_trigger(self):
         """トリガー削除"""

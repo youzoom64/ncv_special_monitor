@@ -4,12 +4,16 @@ import os
 from pathlib import Path
 from datetime import datetime
 import uuid
+import threading
+import websocket
+import time
 
 class HierarchicalConfigManager:
     def __init__(self):
         self.config_root = Path("config")
         self.global_config_path = self.config_root / "global_config.json"
         self.processed_xmls_file = self.config_root / "processed_xmls.json"
+        self.trigger_series_path = self.config_root / "trigger_series.json"
 
         # 設定ディレクトリ作成
         self.config_root.mkdir(exist_ok=True)
@@ -85,9 +89,33 @@ class HierarchicalConfigManager:
 
     # ユーザー管理
     def get_all_special_users(self) -> dict:
-        """全スペシャルユーザーを取得"""
-        config = self.load_global_config()
-        return config.get("special_users_config", {}).get("users", {})
+        """全スペシャルユーザーを取得（ディレクトリベースから）"""
+        users = {}
+        try:
+            user_dirs = self.get_all_user_directories()
+            for user_dir in user_dirs:
+                user_id = user_dir["user_id"]
+                display_name = user_dir["display_name"]
+
+                # ディレクトリから設定を読み込み
+                user_config = self.load_user_config_from_directory(user_id, display_name)
+
+                # 旧形式のAPI互換性のために変換
+                users[user_id] = {
+                    "user_id": user_id,
+                    "display_name": display_name,
+                    "description": user_config.get("user_info", {}).get("description", ""),
+                    "tags": user_config.get("user_info", {}).get("tags", []),
+                    "ai_analysis": user_config.get("ai_analysis", {}),
+                    "default_response": user_config.get("default_response", {}),
+                    "broadcasters": user_config.get("broadcasters", {}),
+                    "special_triggers": user_config.get("special_triggers", []),
+                    "metadata": user_config.get("metadata", {})
+                }
+        except Exception as e:
+            print(f"Error loading special users from directories: {str(e)}")
+
+        return users
 
     def get_user_config(self, user_id: str) -> dict:
         """特定のユーザー設定を取得（新しい形式を優先）"""
@@ -120,10 +148,25 @@ class HierarchicalConfigManager:
 
     def save_user_config(self, user_id: str, user_config: dict):
         """ユーザー設定を保存（新しい形式に移行）"""
-        # display_nameを取得
-        display_name = user_config.get("display_name", f"ユーザー{user_id}")
+        print(f"[DEBUG] save_user_config called: user_id={user_id}")
+        print(f"[DEBUG] user_config structure: {list(user_config.keys())}")
+
+        # display_nameを取得（新旧両方の構造に対応）
+        if "user_info" in user_config:
+            display_name = user_config["user_info"].get("display_name", f"ユーザー{user_id}")
+        else:
+            display_name = user_config.get("display_name", f"ユーザー{user_id}")
+
+        print(f"[DEBUG] extracted display_name: {display_name}")
+
+        # 既に新しい形式の場合はそのまま保存
+        if "user_info" in user_config:
+            print(f"[DEBUG] Already in new format, saving directly")
+            self.save_user_config_to_directory(user_id, display_name, user_config)
+            return
 
         # 新しい形式に変換
+        print(f"[DEBUG] Converting to new format")
         new_config = {
             "user_info": {
                 "user_id": user_id,
@@ -142,30 +185,32 @@ class HierarchicalConfigManager:
             "special_triggers": user_config.get("special_triggers", []),
         }
 
-        # 新しい場所に保存
+        # ディレクトリベースに保存
         self.save_user_config_to_directory(user_id, display_name, new_config)
 
-        # 互換性のため、一時的にグローバル設定にも保存
-        config = self.load_global_config()
-        if "special_users_config" not in config:
-            config["special_users_config"] = {"users": {}}
-
-        user_config["metadata"] = {
-            "created_at": user_config.get("metadata", {}).get("created_at", datetime.now().isoformat()),
-            "updated_at": datetime.now().isoformat(),
-            "config_version": "4.0"
-        }
-
-        config["special_users_config"]["users"][user_id] = user_config
-        self.save_global_config(config)
+        # WebSocketサーバーに設定再読み込みを通知
+        self.notify_websocket_config_reload(user_id)
 
     def delete_user_config(self, user_id: str):
-        """ユーザー設定を削除"""
-        config = self.load_global_config()
-        users = config.get("special_users_config", {}).get("users", {})
-        if user_id in users:
-            del users[user_id]
-            self.save_global_config(config)
+        """ユーザー設定を削除（ディレクトリベース）"""
+        try:
+            # ユーザーディレクトリを特定
+            user_dirs = self.get_all_user_directories()
+            for user_dir in user_dirs:
+                if user_dir["user_id"] == user_id:
+                    display_name = user_dir["display_name"]
+                    user_dir_path = self.get_user_directory_path(user_id, display_name)
+
+                    # ディレクトリ全体を削除
+                    import shutil
+                    if user_dir_path.exists():
+                        shutil.rmtree(user_dir_path)
+                        print(f"ユーザー設定ディレクトリを削除: {user_dir_path}")
+                    return
+
+            print(f"ユーザー {user_id} のディレクトリが見つかりませんでした")
+        except Exception as e:
+            print(f"ユーザー設定削除エラー: {str(e)}")
 
     def create_default_user_config(self, user_id: str, display_name: str = None) -> dict:
         """デフォルトユーザー設定を作成（グローバル設定を使用）"""
@@ -455,8 +500,13 @@ class HierarchicalConfigManager:
 
     def save_user_config_to_directory(self, user_id: str, display_name: str, user_config: dict):
         """スペシャルユーザーディレクトリに設定を保存"""
+        print(f"[DEBUG] save_user_config_to_directory called: user_id={user_id}, display_name={display_name}")
+        print(f"[DEBUG] user_config keys: {list(user_config.keys())}")
+
         user_dir = self.get_user_directory_path(user_id, display_name)
         config_path = self.get_user_config_path(user_id, display_name)
+
+        print(f"[DEBUG] Save path: {config_path}")
 
         # ディレクトリを作成
         user_dir.mkdir(parents=True, exist_ok=True)
@@ -472,6 +522,7 @@ class HierarchicalConfigManager:
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(user_config, f, ensure_ascii=False, indent=2)
             print(f"ユーザー設定保存: {config_path}")
+            print(f"[DEBUG] 保存完了: {config_path}")
         except Exception as e:
             print(f"ユーザー設定保存エラー ({config_path}): {str(e)}")
 
@@ -571,6 +622,365 @@ class HierarchicalConfigManager:
                     continue
 
         return user_dirs
+
+    # === トリガーシリーズ管理機能 ===
+
+    def load_trigger_series(self) -> dict:
+        """トリガーシリーズ設定を読み込み"""
+        if self.trigger_series_path.exists():
+            try:
+                with open(self.trigger_series_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"トリガーシリーズ読み込みエラー: {str(e)}")
+                return self._get_default_trigger_series()
+
+        return self._get_default_trigger_series()
+
+    def save_trigger_series(self, series_config: dict):
+        """トリガーシリーズ設定を保存"""
+        try:
+            series_config["last_updated"] = datetime.now().isoformat()
+            with open(self.trigger_series_path, 'w', encoding='utf-8') as f:
+                json.dump(series_config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"トリガーシリーズ保存エラー: {str(e)}")
+
+    def _get_default_trigger_series(self) -> dict:
+        """デフォルトのトリガーシリーズ設定"""
+        default_series = {
+            # 1. 親しみやすい挨拶シリーズ
+            "friendly_greetings": {
+                "name": "親しみやすい挨拶",
+                "description": "温かくて親しみやすい挨拶メッセージのシリーズ",
+                "triggers": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "おはよう挨拶",
+                        "enabled": True,
+                        "keywords": ["おはよう", "おは", "グッモー", "good morning"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} おはようございます！今日も素敵な一日になりますように✨",
+                            ">>{{no}} おはよう！今日も元気いっぱいで頑張ろう！",
+                            ">>{{no}} おはようございます〜♪ いい天気ですね！"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 1,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 100
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "こんばんは挨拶",
+                        "enabled": True,
+                        "keywords": ["こんばんは", "こんばんわ", "晩は", "お疲れ様"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} こんばんは！今日もお疲れ様でした〜",
+                            ">>{{no}} こんばんは♪ ゆっくり過ごしてくださいね",
+                            ">>{{no}} お疲れ様です！今夜もよろしくお願いします"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 1,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 100
+                    }
+                ]
+            },
+
+            # 2. 機械的情報表示シリーズ
+            "mechanical_info": {
+                "name": "機械的情報表示",
+                "description": "感情を排した冷静で機械的な情報提供メッセージ",
+                "triggers": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "時刻通知",
+                        "enabled": True,
+                        "keywords": ["時間", "何時", "いま何時", "時刻"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} システム時刻を確認してください。",
+                            ">>{{no}} 現在時刻の確認が必要です。",
+                            ">>{{no}} タイムスタンプ：確認要求を受信しました。"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 2,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 100
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "状況報告",
+                        "enabled": True,
+                        "keywords": ["状況", "どう", "様子", "調子"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} システム稼働中。異常は検出されていません。",
+                            ">>{{no}} ステータス：正常動作。監視継続中。",
+                            ">>{{no}} 動作確認完了。全システム正常です。"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 2,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 100
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "接続確認",
+                        "enabled": True,
+                        "keywords": ["接続", "つながってる", "見えてる", "聞こえる"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} 接続テスト実行中。信号受信を確認しました。",
+                            ">>{{no}} 通信状態：良好。データ転送正常。",
+                            ">>{{no}} 受信確認。接続は安定しています。"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 1,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 100
+                    }
+                ]
+            },
+
+            # 3. お礼・感謝シリーズ
+            "appreciation": {
+                "name": "お礼・感謝表現",
+                "description": "感謝やお礼を表現するメッセージシリーズ",
+                "triggers": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "ありがとう反応",
+                        "enabled": True,
+                        "keywords": ["ありがとう", "あざす", "thx", "thanks", "感謝"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} こちらこそありがとうございます！",
+                            ">>{{no}} いえいえ、こちらこそ〜♪",
+                            ">>{{no}} とんでもないです！ありがとうございます✨"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 2,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 100
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "褒められ反応",
+                        "enabled": True,
+                        "keywords": ["すごい", "上手", "うまい", "素晴らしい", "great"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} ありがとうございます！嬉しいです〜",
+                            ">>{{no}} そう言っていただけると励みになります！",
+                            ">>{{no}} わー！ありがとうございます♪ 頑張った甲斐がありました！"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 1,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 100
+                    }
+                ]
+            },
+
+            # 4. 雑談・コミュニケーションシリーズ
+            "casual_chat": {
+                "name": "雑談・コミュニケーション",
+                "description": "日常的な雑談や軽いコミュニケーションのシリーズ",
+                "triggers": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "天気の話",
+                        "enabled": True,
+                        "keywords": ["天気", "雨", "晴れ", "曇り", "暑い", "寒い"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} 今日の天気はどうですか？",
+                            ">>{{no}} 天気によって気分も変わりますよね〜",
+                            ">>{{no}} こういう天気の日はのんびりしたいですね♪"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 2,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 80
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "食べ物の話",
+                        "enabled": True,
+                        "keywords": ["美味しい", "食べた", "ご飯", "ランチ", "夕食", "おやつ"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} 美味しそう！何を食べたんですか？",
+                            ">>{{no}} 食べ物の話って楽しいですよね〜",
+                            ">>{{no}} お腹すいてきちゃいました😋"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 2,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 70
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "趣味の話",
+                        "enabled": True,
+                        "keywords": ["趣味", "好き", "ハマってる", "最近", "始めた"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} 趣味の話って聞いてて楽しいです♪",
+                            ">>{{no}} どんなことにハマってるんですか？",
+                            ">>{{no}} 新しいことに挑戦するのっていいですよね！"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 1,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 60
+                    }
+                ]
+            },
+
+            # 5. エモーショナル・応援シリーズ
+            "emotional_support": {
+                "name": "応援・励まし",
+                "description": "励ましや応援、共感を示すメッセージシリーズ",
+                "triggers": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "疲れた時の励まし",
+                        "enabled": True,
+                        "keywords": ["疲れた", "つかれた", "だるい", "しんどい", "眠い"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} お疲れ様です！無理しないでくださいね",
+                            ">>{{no}} 疲れた時は休むのが一番ですよ〜",
+                            ">>{{no}} 今日も一日お疲れ様でした！ゆっくり休んでください"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 2,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 100
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "頑張ってる人への応援",
+                        "enabled": True,
+                        "keywords": ["頑張る", "頑張って", "努力", "挑戦", "やってみる"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} 応援してます！頑張ってください〜",
+                            ">>{{no}} その意気です！きっとうまくいきますよ♪",
+                            ">>{{no}} 挑戦する姿勢、素敵です！"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 1,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 90
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "落ち込み時の慰め",
+                        "enabled": True,
+                        "keywords": ["落ち込む", "悲しい", "うまくいかない", "失敗", "ダメ"],
+                        "keyword_condition": "OR",
+                        "response_type": "predefined",
+                        "messages": [
+                            ">>{{no}} そんな日もありますよ。大丈夫です",
+                            ">>{{no}} 落ち込まないでください。明日はきっといい日になります",
+                            ">>{{no}} 失敗は成功のもと！次に活かせますよ"
+                        ],
+                        "ai_response_prompt": "",
+                        "max_reactions_per_stream": 1,
+                        "response_delay_seconds": 0,
+                        "firing_probability": 100
+                    }
+                ]
+            }
+        }
+
+        return {
+            "series": default_series,
+            "last_updated": datetime.now().isoformat()
+        }
+
+    def get_all_trigger_series(self) -> dict:
+        """全トリガーシリーズを取得"""
+        config = self.load_trigger_series()
+        return config.get("series", {})
+
+    def save_trigger_series_item(self, series_id: str, series_data: dict):
+        """個別のトリガーシリーズを保存"""
+        config = self.load_trigger_series()
+        config["series"][series_id] = series_data
+        self.save_trigger_series(config)
+
+    def delete_trigger_series(self, series_id: str):
+        """トリガーシリーズを削除"""
+        config = self.load_trigger_series()
+        if series_id in config["series"]:
+            del config["series"][series_id]
+            self.save_trigger_series(config)
+
+    def get_trigger_series(self, series_id: str) -> dict:
+        """特定のトリガーシリーズを取得"""
+        all_series = self.get_all_trigger_series()
+        return all_series.get(series_id, {})
+
+    def notify_websocket_config_reload(self, user_id: str):
+        """WebSocketサーバーに設定再読み込みを通知"""
+        def send_notification():
+            try:
+                print(f"[CONFIG] Notifying WebSocket server to reload config for user {user_id}")
+
+                def on_message(ws, message):
+                    response = json.loads(message)
+                    if response.get('type') == 'config_reload_response':
+                        print(f"[CONFIG] Server responded: {response.get('status', 'unknown')}")
+
+                def on_error(ws, error):
+                    print(f"[CONFIG] WebSocket error during config reload: {error}")
+
+                def on_close(ws, close_status_code, close_msg):
+                    pass
+
+                def on_open(ws):
+                    reload_message = {
+                        'type': 'reload_user_config',
+                        'user_id': user_id
+                    }
+                    ws.send(json.dumps(reload_message))
+                    print(f"[CONFIG] Sent reload notification for user {user_id}")
+                    # 短時間で接続を閉じる
+                    threading.Timer(1.0, ws.close).start()
+
+                ws = websocket.WebSocketApp('ws://localhost:8766',
+                                          on_open=on_open,
+                                          on_message=on_message,
+                                          on_error=on_error,
+                                          on_close=on_close)
+
+                # 別スレッドで実行して非同期にする
+                ws.run_forever()
+
+            except Exception as e:
+                print(f"[CONFIG] Failed to notify WebSocket server: {e}")
+
+        # バックグラウンドで通知を送信
+        notification_thread = threading.Thread(target=send_notification, daemon=True)
+        notification_thread.start()
 
 # 既存コードとの互換性
 NCVSpecialConfigManager = HierarchicalConfigManager

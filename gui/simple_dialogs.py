@@ -4,6 +4,8 @@
 import tkinter as tk
 from tkinter import ttk
 import tkinter.messagebox as msgbox
+import requests
+from bs4 import BeautifulSoup
 
 from .utils import log_to_gui
 
@@ -40,7 +42,11 @@ class SimpleBroadcasterEditDialog:
         # 基本情報
         ttk.Label(main_frame, text="配信者ID:").grid(row=0, column=0, sticky=tk.W, pady=5)
         self.broadcaster_id_var = tk.StringVar(value=self.broadcaster_config.get("broadcaster_id", ""))
-        ttk.Entry(main_frame, textvariable=self.broadcaster_id_var, width=30).grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
+        broadcaster_id_frame = ttk.Frame(main_frame)
+        broadcaster_id_frame.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
+        self.broadcaster_id_entry = ttk.Entry(broadcaster_id_frame, textvariable=self.broadcaster_id_var)
+        self.broadcaster_id_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(broadcaster_id_frame, text="名前取得", command=self.fetch_broadcaster_name).pack(side=tk.LEFT, padx=(5, 0))
 
         ttk.Label(main_frame, text="配信者名:").grid(row=1, column=0, sticky=tk.W, pady=5)
         self.broadcaster_name_var = tk.StringVar(value=self.broadcaster_config.get("broadcaster_name", ""))
@@ -111,6 +117,37 @@ class SimpleBroadcasterEditDialog:
 
     def cancel(self):
         self.dialog.destroy()
+
+    def fetch_broadcaster_name(self):
+        """配信者名取得"""
+        broadcaster_id = self.broadcaster_id_var.get().strip()
+        if not broadcaster_id:
+            log_to_gui("配信者IDを入力してください")
+            return
+
+        try:
+            url = f"https://www.nicovideo.jp/user/{broadcaster_id}"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            response = requests.get(url, headers=headers, timeout=10)
+            response.encoding = "utf-8"
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # ユーザー名を取得
+            nickname = None
+            meta_tag = soup.find("meta", {"property": "profile:username"})
+            if meta_tag and meta_tag.get("content"):
+                nickname = meta_tag["content"]
+
+            if nickname:
+                self.broadcaster_name_var.set(nickname)
+                log_to_gui(f"配信者名を取得しました: {nickname}")
+            else:
+                self.broadcaster_name_var.set(f"配信者{broadcaster_id}")
+                log_to_gui("配信者名を取得できませんでした")
+
+        except Exception as e:
+            self.broadcaster_name_var.set(f"配信者{broadcaster_id}")
+            log_to_gui(f"配信者情報の取得に失敗しました: {str(e)}")
 
 
 class SimpleTriggerEditDialog:

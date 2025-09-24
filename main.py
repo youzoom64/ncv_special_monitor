@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 import webbrowser
 import tempfile
+import random
 
 from config_manager import HierarchicalConfigManager
 from logger import NCVSpecialLogger
@@ -2146,6 +2147,15 @@ class SpecialTriggerEditDialog:
         self.ai_prompt_var = tk.StringVar(value=self.trigger_config.get("ai_response_prompt", ""))
         ttk.Entry(response_frame, textvariable=self.ai_prompt_var).pack(fill=tk.X)
 
+        # 確率設定
+        probability_frame = ttk.LabelFrame(main_frame, text="発火設定", padding="5")
+        probability_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(probability_frame, text="発火確率(%):").grid(row=0, column=0, sticky=tk.W)
+        self.probability_var = tk.StringVar(value=str(self.trigger_config.get("firing_probability", 100)))
+        ttk.Entry(probability_frame, textvariable=self.probability_var, width=10).grid(row=0, column=1, padx=(5, 0))
+        ttk.Label(probability_frame, text="(0-100の数値で指定)").grid(row=0, column=2, padx=(5, 0), sticky=tk.W)
+
         # 注意事項
         note_frame = ttk.Frame(main_frame)
         note_frame.pack(fill=tk.X, pady=(0, 10))
@@ -2191,7 +2201,8 @@ class SpecialTriggerEditDialog:
             "response_type": self.response_type_var.get(),
             "messages": messages,
             "ai_response_prompt": self.ai_prompt_var.get(),
-            "ignore_all_limits": True
+            "ignore_all_limits": True,
+            "firing_probability": int(self.probability_var.get() or 100)
         }
 
         self.config_manager.save_special_trigger_config(self.user_id, trigger_config)
@@ -2200,6 +2211,19 @@ class SpecialTriggerEditDialog:
 
     def cancel(self):
         self.dialog.destroy()
+
+
+def should_trigger_fire(trigger_config):
+    """トリガーが発火するかどうかを確率で判定"""
+    probability = trigger_config.get("firing_probability", 100)
+
+    # 0-100の範囲に制限
+    probability = max(0, min(100, probability))
+
+    # ランダムな数値(0-99)を生成して確率と比較
+    random_value = random.randint(0, 99)
+
+    return random_value < probability
 
 
 def main():

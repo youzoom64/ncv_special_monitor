@@ -17,14 +17,22 @@ from config_manager import HierarchicalConfigManager
 
 class NCVCommentServer:
     def __init__(self):
+        print("[DEBUG] NCVCommentServer.__init__() 開始")
         self.clients = {}  # instance_id をキーにしたクライアント辞書
         self.logger = logging.getLogger(__name__)
+        print("[DEBUG] HierarchicalConfigManager初期化")
         self.config_manager = HierarchicalConfigManager()
         self.special_users_cache = {}  # user_id をキーにした特別ユーザー設定のキャッシュ
         self.monitored_user_ids = set()  # 監視対象のユーザーID集合
 
+        print("[DEBUG] 特別ユーザー設定初回読み込み開始")
         # 初回設定読み込み
         self.load_special_users_config()
+
+    def debug_print(self, message):
+        """デバッグメッセージをターミナルに出力"""
+        print(f"[DEBUG] {message}")
+        self.logger.debug(message)
         
     async def handler(self, websocket, *args):
         """
@@ -178,6 +186,21 @@ class NCVCommentServer:
 
         # スペシャルユーザーチェックと自動応答処理
         if user_id in self.monitored_user_ids:
+            # スペシャルユーザーが有効かどうかをチェック
+            user_cache = self.special_users_cache.get(user_id)
+            if user_cache:
+                user_config = user_cache['config']
+                user_enabled = user_config.get("user_info", {}).get("enabled", True)
+                if not user_enabled:
+                    self.logger.debug(f"[SpecialUser] User {user_name} ({user_id}) is disabled, skipping")
+                    # 確認応答のみ送信
+                    await websocket.send(json.dumps({
+                        'type': 'ack',
+                        'message': 'Comment received (user disabled)',
+                        'live_id': live_id
+                    }))
+                    return
+
             self.logger.info(f"[SpecialUser] Detected special user: {user_name} ({user_id})")
 
             response_message = await self.process_special_user_comment(
@@ -185,8 +208,28 @@ class NCVCommentServer:
             )
 
             if response_message:
+                # スペシャルユーザーの分割送信間隔設定を取得
+                user_cache = self.special_users_cache.get(user_id)
+                split_delay = 1  # デフォルト値
+
+                if user_cache:
+                    user_config = user_cache['config']
+
+                    # デフォルト応答の分割送信間隔を取得
+                    default_response = user_config.get('default_response', {})
+                    split_delay = default_response.get('response_split_delay_seconds', 1)
+
+                    # 配信者設定の分割送信間隔も確認
+                    broadcasters = user_config.get('broadcasters', {})
+                    for broadcaster_id, broadcaster_info in broadcasters.items():
+                        if broadcaster_info.get('enabled', True):
+                            broadcaster_split_delay = broadcaster_info.get('default_response', {}).get('response_split_delay_seconds')
+                            if broadcaster_split_delay is not None:
+                                split_delay = broadcaster_split_delay
+                                break
+
                 # 応答メッセージをNCVプラグインに送信
-                await self.send_response_to_ncv_plugin(instance_id, response_message)
+                await self.send_response_to_ncv_plugin(instance_id, response_message, split_delay)
             else:
                 self.logger.debug(f"[SpecialUser] No response generated for: {comment}")
 
@@ -405,7 +448,7 @@ class NCVCommentServer:
     async def process_special_user_comment(self, user_id: str, user_name: str, comment: str, live_id: str, instance_id: str, comment_no: int = 1) -> str:
         """スペシャルユーザーのコメントを処理して応答メッセージを生成"""
         try:
-            self.logger.debug(f"[DEBUG] process_special_user_comment called: user_id={user_id}, comment='{comment}'")
+            print(f"[DEBUG] コメント処理: {user_name}({user_id}) → '{comment}'")
 
             if user_id not in self.special_users_cache:
                 self.logger.debug(f"[DEBUG] User {user_id} not found in special_users_cache")
@@ -414,6 +457,16 @@ class NCVCommentServer:
             user_cache = self.special_users_cache[user_id]
             user_config = user_cache['config']
             self.logger.debug(f"[DEBUG] User config loaded for {user_id}")
+
+            # 最上位階層チェック: スペシャルユーザー自体が無効なら全て無効
+            user_info_enabled = user_config.get('user_info', {}).get('enabled', True)
+            overall_user_enabled = user_config.get('enabled', True)  # 直接形式もチェック
+            user_enabled = user_info_enabled and overall_user_enabled
+
+            self.logger.debug(f"[DEBUG] User enabled check: user_info.enabled={user_info_enabled}, direct.enabled={overall_user_enabled}, final={user_enabled}")
+            if not user_enabled:
+                self.logger.debug(f"[DEBUG] User {user_id} is disabled at top level, skipping all processing")
+                return None
 
             # 配信者設定を取得（簡略化：最初の有効な配信者を使用）
             broadcasters = user_config.get('broadcasters', {})
@@ -432,17 +485,36 @@ class NCVCommentServer:
 
             if not active_broadcaster:
                 self.logger.debug(f"[DEBUG] No active broadcaster found, checking user default response")
-                # デフォルト応答を試行
+                # デフォルト応答を試行（有効で定型メッセージがあれば使用）
                 default_response = user_config.get('default_response', {})
-                self.logger.debug(f"[DEBUG] User default response enabled: {default_response.get('enabled', False)}")
-                if default_response.get('enabled', False):
+                default_enabled = default_response.get('enabled', True)
+                messages = default_response.get('messages', [])
+                self.logger.debug(f"[DEBUG] User default response enabled: {default_enabled}, messages: {messages}")
+                if default_enabled and messages:
                     response = self.generate_response_message(default_response, user_name, comment, None, comment_no, user_id)
                     self.logger.debug(f"[DEBUG] Generated user default response: {response}")
                     return response
-                self.logger.debug(f"[DEBUG] No user default response available")
+                self.logger.debug(f"[DEBUG] User default response disabled or no messages available")
                 return None
 
-            # トリガーチェック
+            # 中間階層チェック: 配信者が無効なら配信者関連のすべてを無効
+            broadcaster_enabled = active_broadcaster.get('enabled', True)
+            self.logger.debug(f"[DEBUG] Active broadcaster {active_broadcaster_id} enabled: {broadcaster_enabled}")
+            if not broadcaster_enabled:
+                self.logger.debug(f"[DEBUG] Broadcaster {active_broadcaster_id} is disabled, skipping broadcaster-level processing")
+                # 配信者が無効の場合、ユーザーデフォルト応答を試行
+                default_response = user_config.get('default_response', {})
+                default_enabled = default_response.get('enabled', True)
+                messages = default_response.get('messages', [])
+                self.logger.debug(f"[DEBUG] Fallback to user default response enabled: {default_enabled}, messages: {messages}")
+                if default_enabled and messages:
+                    response = self.generate_response_message(default_response, user_name, comment, None, comment_no, user_id)
+                    self.logger.debug(f"[DEBUG] Generated fallback user default response: {response}")
+                    return response
+                self.logger.debug(f"[DEBUG] No fallback response available")
+                return None
+
+            # トリガーチェック（配信者が有効な場合のみ実行）
             triggers = active_broadcaster.get('triggers', [])
             self.logger.debug(f"[DEBUG] Active broadcaster has {len(triggers)} triggers")
 
@@ -568,7 +640,7 @@ class NCVCommentServer:
                 self.logger.debug(f"[DEBUG] Using AI response")
                 ai_prompt = response_config.get('ai_response_prompt', '')
                 if ai_prompt:
-                    ai_response = self.generate_ai_response(ai_prompt, user_name, comment, user_id, broadcaster_config, comment_no)
+                    ai_response = self.generate_ai_response(ai_prompt, user_name, comment, user_id, broadcaster_config, comment_no, trigger_content=comment)
                     if ai_response:
                         return ai_response
                     else:
@@ -587,9 +659,11 @@ class NCVCommentServer:
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    def generate_ai_response(self, prompt_template: str, user_name: str, comment: str, user_id: str, broadcaster_config: dict = None, comment_no: int = 1) -> str:
+    def generate_ai_response(self, prompt_template: str, user_name: str, comment: str, user_id: str, broadcaster_config: dict = None, comment_no: int = 1, trigger_content: str = None) -> str:
         """AI応答を生成"""
         try:
+            print(f"[DEBUG] AI応答生成: プロンプト='{prompt_template}'")
+
             # グローバル設定を取得
             global_config = self.config_manager.load_global_config()
             api_settings = global_config.get('api_settings', {})
@@ -612,6 +686,7 @@ class NCVCommentServer:
 
             # プロンプトのテンプレート変数を置換
             prompt = prompt_template
+
             prompt = prompt.replace('{{no}}', str(comment_no))
             prompt = prompt.replace('{no}', str(comment_no))
             prompt = prompt.replace('{{user_name}}', user_name)
@@ -622,6 +697,11 @@ class NCVCommentServer:
             prompt = prompt.replace('{user_id}', user_id)
             prompt = prompt.replace('{{comment_content}}', comment)
             prompt = prompt.replace('{comment_content}', comment)
+
+            # trigger_contentがある場合は使用、なければcommentをフォールバック
+            actual_trigger_content = trigger_content if trigger_content is not None else comment
+            prompt = prompt.replace('{{trigger_content}}', actual_trigger_content)
+            prompt = prompt.replace('{trigger_content}', actual_trigger_content)
             prompt = prompt.replace('{{time}}', current_time)
             prompt = prompt.replace('{time}', current_time)
             prompt = prompt.replace('{{date}}', current_date)
@@ -631,25 +711,32 @@ class NCVCommentServer:
 
             if broadcaster_config:
                 broadcaster_name = broadcaster_config.get('broadcaster_name', 'Unknown')
+                self.logger.debug(f"[AI DEBUG] broadcaster_name: '{broadcaster_name}'")
                 prompt = prompt.replace('{{broadcaster_name}}', broadcaster_name)
                 prompt = prompt.replace('{broadcaster_name}', broadcaster_name)
+                self.logger.debug(f"[AI DEBUG] After broadcaster replacement: '{prompt}'")
 
-            self.logger.info(f"[AI] Generating response with model: {model}")
-            self.logger.debug(f"[AI] Prompt: {prompt}")
+            print(f"[DEBUG] API呼び出し: '{prompt}' → {model}")
 
             # OpenAI API呼び出し
             if model.startswith('openai-'):
-                response = self.call_openai_api(api_key, model.replace('openai-', ''), prompt, max_chars)
+                actual_model = model.replace('openai-', '')
+                response = self.call_openai_api(api_key, actual_model, prompt, max_chars)
             else:
                 self.logger.warning(f"[AI] Unsupported model: {model}")
                 return None
 
             if response:
-                # コメント番号を先頭に追加
-                formatted_response = f">>{comment_no} {response}"
-                self.logger.info(f"[AI] Generated response: {formatted_response}")
-                return formatted_response
+                # 改行を削除して一行にまとめる
+                single_line_response = ' '.join(line.strip() for line in response.split('\n') if line.strip())
+                print(f"[DEBUG] AI応答({len(single_line_response)}文字): {single_line_response}")
+
+                if single_line_response:
+                    return single_line_response
+                else:
+                    return response
             else:
+                self.logger.debug(f"[AI DEBUG] No response generated")
                 return None
 
         except Exception as e:
@@ -705,41 +792,44 @@ class NCVCommentServer:
             self.logger.error(f"Error calling OpenAI API: {str(e)}")
             return None
 
-    async def send_response_to_ncv_plugin(self, instance_id: str, response_message: str):
+    async def send_response_to_ncv_plugin(self, instance_id: str, response_message: str, split_delay: float = None):
         """NCVプラグインに応答メッセージを送信（必要に応じてメッセージを分割）"""
         try:
-            # グローバル設定から分割設定を取得
-            global_config = self.config_manager.load_global_config()
-            api_settings = global_config.get('api_settings', {})
-            split_delay = api_settings.get('response_split_delay_seconds', 1)
+            # split_delayが指定されていない場合はグローバル設定から取得
+            if split_delay is None:
+                global_config = self.config_manager.load_global_config()
+                api_settings = global_config.get('api_settings', {})
+                split_delay = api_settings.get('response_split_delay_seconds', 1)
 
-            # 150文字以内の場合はそのまま送信
-            if len(response_message) <= 150:
+            # 70文字以内の場合はそのまま送信
+            print(f"[DEBUG] 文字数判定: {len(response_message)}文字 vs 70文字")
+            if len(response_message) <= 70:
+                print(f"[DEBUG] 単一送信({len(response_message)}文字): {response_message}")
                 success, message = await self.send_comment_to_specific_client(instance_id, response_message)
                 if success:
-                    self.logger.info(f"[AutoResponse] Sent: {response_message}")
+                    print(f"[DEBUG] ✓ 送信成功")
                 else:
-                    self.logger.warning(f"[AutoResponse] Failed to send: {message}")
+                    print(f"[DEBUG] ✗ 送信失敗: {message}")
                 return
 
-            # 150文字を超える場合は分割して送信
-            self.logger.info(f"[AutoResponse] Message too long ({len(response_message)} chars), splitting into parts")
+            # 70文字を超える場合は分割して送信
+            print(f"[DEBUG] 分割送信({len(response_message)}文字, {split_delay}秒間隔):")
 
-            # メッセージを150文字ずつに分割
+            # メッセージを70文字ずつに分割
             parts = []
             remaining_message = response_message
             part_number = 1
 
             while remaining_message:
-                if len(remaining_message) <= 150:
+                if len(remaining_message) <= 70:
                     # 最後の部分
                     parts.append(remaining_message)
                     break
                 else:
-                    # 150文字で切り取り、できるだけ句読点や空白で区切る
-                    cut_pos = 150
+                    # 70文字で切り取り、できるだけ句読点や空白で区切る
+                    cut_pos = 70
                     # より自然な位置で分割するため、句読点や空白を探す
-                    for i in range(min(140, len(remaining_message)-10), min(150, len(remaining_message))):
+                    for i in range(min(60, len(remaining_message)-10), min(70, len(remaining_message))):
                         if remaining_message[i] in ['。', '！', '？', '、', ' ', '　']:
                             cut_pos = i + 1
                             break
@@ -751,15 +841,19 @@ class NCVCommentServer:
 
             # 各部分を順次送信
             for i, part in enumerate(parts):
+                print(f"[DEBUG] パート{i+1}/{len(parts)}: '{part}'")
                 success, message = await self.send_comment_to_specific_client(instance_id, part)
                 if success:
-                    self.logger.info(f"[AutoResponse] Sent part {i+1}/{len(parts)}: {part}")
+                    print(f"[DEBUG] ✓ 送信成功")
                 else:
-                    self.logger.warning(f"[AutoResponse] Failed to send part {i+1}/{len(parts)}: {message}")
+                    print(f"[DEBUG] ✗ 送信失敗: {message}")
 
                 # 最後の部分以外は遅延を入れる
                 if i < len(parts) - 1:
+                    print(f"[DEBUG] {split_delay}秒待機...")
                     await asyncio.sleep(split_delay)
+
+            print(f"[DEBUG] 分割送信完了({len(parts)}パート)")
 
         except Exception as e:
             self.logger.error(f"Error sending response to NCV plugin: {str(e)}")

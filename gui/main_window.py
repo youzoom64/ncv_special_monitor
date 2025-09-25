@@ -17,8 +17,10 @@ from logger import NCVSpecialLogger
 from file_monitor import NCVFolderMonitor
 from broadcast_detector import BroadcastEndDetector
 from pipeline import PipelineExecutor
+from ncv_comment_monitor import NCVCommentServer
 import bulk_broadcaster_registration
 from bulk_broadcaster_registration import show_bulk_registration_dialog
+import asyncio
 
 from .utils import log_to_gui, set_main_app
 from .user_dialog import UserEditDialog
@@ -27,28 +29,44 @@ from .broadcaster_dialog import BroadcasterManagementDialog
 
 class NCVSpecialMonitorGUI:
     def __init__(self, root):
+        print("[DEBUG] NCVSpecialMonitorGUI.__init__() 開始")
         self.root = root
         self.root.title("NCV Special User Monitor v4")
         self.root.geometry("1000x600")
 
         # メインアプリのインスタンスを設定
+        print("[DEBUG] メインアプリのインスタンス設定")
         set_main_app(self)
 
         # bulk_broadcaster_registrationのlog_to_gui関数を上書き
+        print("[DEBUG] log_to_gui関数上書き設定")
         bulk_broadcaster_registration.log_to_gui = log_to_gui
 
         # コンポーネント初期化
+        print("[DEBUG] HierarchicalConfigManager初期化")
         self.config_manager = HierarchicalConfigManager()
+        print("[DEBUG] NCVSpecialLogger初期化")
         self.logger = NCVSpecialLogger()
+        print("[DEBUG] PipelineExecutor初期化")
         self.pipeline_executor = PipelineExecutor(self.config_manager, self.logger)
+        print("[DEBUG] BroadcastEndDetector初期化")
         self.broadcast_detector = BroadcastEndDetector(self.config_manager, self.logger, self.pipeline_executor)
+        print("[DEBUG] NCVFolderMonitor初期化")
         self.file_monitor = NCVFolderMonitor(self.config_manager, self.logger, self.broadcast_detector)
 
+        # WebSocketサーバー初期化
+        print("[DEBUG] NCVCommentServer初期化")
+        self.websocket_server = NCVCommentServer()
+
         # パイプラインエグゼキューターにファイルモニターを設定
+        print("[DEBUG] パイプラインエグゼキューター設定")
         self.pipeline_executor.file_monitor = self.file_monitor
 
+        print("[DEBUG] GUI設定開始")
         self.setup_gui()
+        print("[DEBUG] 設定読み込み開始")
         self.load_config()
+        print("[DEBUG] ログ表示更新開始")
         self.root.after(1000, self.update_log_display)
 
     def update_log_display(self):

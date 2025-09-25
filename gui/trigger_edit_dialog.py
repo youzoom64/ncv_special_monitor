@@ -9,6 +9,10 @@ from .utils import log_to_gui
 
 class TriggerEditDialog:
     def __init__(self, parent, config_manager, user_id, broadcaster_id, trigger_id=None):
+        print(f"[GUI DEBUG] TriggerEditDialog.__init__ called:")
+        print(f"[GUI DEBUG]   user_id: {user_id}")
+        print(f"[GUI DEBUG]   broadcaster_id: {broadcaster_id}")
+        print(f"[GUI DEBUG]   trigger_id: {trigger_id}")
         self.result = False
         self.config_manager = config_manager
         self.user_id = user_id
@@ -112,21 +116,29 @@ class TriggerEditDialog:
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
 
-        ttk.Button(button_frame, text="保存", command=self.save_trigger).pack(side=tk.LEFT, padx=(0, 5))
+        save_button = ttk.Button(button_frame, text="保存", command=self.save_trigger)
+        save_button.pack(side=tk.LEFT, padx=(0, 5))
+        print(f"[GUI DEBUG] Save button created with command: {self.save_trigger}")
         ttk.Button(button_frame, text="キャンセル", command=self.cancel).pack(side=tk.LEFT)
 
     def save_trigger(self):
         """トリガー保存"""
+        print(f"[GUI DEBUG] save_trigger() method called")
         trigger_name = self.trigger_name_var.get().strip()
+        print(f"[GUI DEBUG] trigger_name: '{trigger_name}'")
 
         if not trigger_name:
+            print(f"[GUI DEBUG] trigger_name is empty, returning")
             log_to_gui("トリガー名を入力してください")
             return
 
         # キーワードを処理
         keywords_text = self.keywords_text.get("1.0", tk.END).strip()
+        print(f"[GUI DEBUG] keywords_text: '{keywords_text}'")
         keywords = [kw.strip() for kw in keywords_text.split("\n") if kw.strip()]
+        print(f"[GUI DEBUG] keywords: {keywords}")
         if not keywords:
+            print(f"[GUI DEBUG] keywords is empty, returning")
             log_to_gui("キーワードを少なくとも1つ入力してください")
             return
 
@@ -152,7 +164,12 @@ class TriggerEditDialog:
             "firing_probability": int(self.probability_var.get() or 100)
         }
 
+        print(f"[GUI DEBUG] Calling save_trigger_config with:")
+        print(f"[GUI DEBUG]   user_id: {self.user_id}")
+        print(f"[GUI DEBUG]   broadcaster_id: {self.broadcaster_id}")
+        print(f"[GUI DEBUG]   trigger_config: {trigger_config}")
         self.config_manager.save_trigger_config(self.user_id, self.broadcaster_id, trigger_config)
+        print(f"[GUI DEBUG] save_trigger_config call completed")
         self.result = True
         self.dialog.destroy()
 

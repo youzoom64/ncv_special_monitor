@@ -74,11 +74,44 @@ class HierarchicalConfigManager:
         self.save_global_config(default_config)
         return default_config
 
+    def _safe_save_global_config(self, update_func):
+        """汎用グローバル設定保存ロジック: 現在の設定を読み込み→更新関数適用→保存"""
+        try:
+            print(f"[DEBUG] _safe_save_global_config called")
+            # ステップ1: 現在の完全な設定を読み込み
+            current_config = self.load_global_config()
+            print(f"[DEBUG] Loaded global config with keys: {list(current_config.keys())}")
+
+            # ステップ2: 更新関数を適用
+            print(f"[DEBUG] Applying global config update function...")
+            update_func(current_config)
+
+            # ステップ3: 完全な設定を保存
+            print(f"[DEBUG] Saving global config...")
+            current_config["last_updated"] = datetime.now().isoformat()
+            with open(self.global_config_path, 'w', encoding='utf-8') as f:
+                json.dump(current_config, f, ensure_ascii=False, indent=2)
+            print(f"[DEBUG] Global config save completed successfully")
+            return True
+        except Exception as e:
+            print(f"[ERROR] Global config save failed: {e}")
+            import traceback
+            print(f"[ERROR] Traceback: {traceback.format_exc()}")
+            return False
+
     def save_global_config(self, config: dict):
-        """グローバル設定を保存"""
-        config["last_updated"] = datetime.now().isoformat()
-        with open(self.global_config_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        """グローバル設定を保存（メモリファースト方式）"""
+        def update_global_config(current_config):
+            # 新しい設定で現在の設定を更新
+            current_config.update(config)
+
+        success = self._safe_save_global_config(update_global_config)
+        if not success:
+            # フォールバック: 直接保存
+            print(f"[WARNING] Using fallback global config save")
+            config["last_updated"] = datetime.now().isoformat()
+            with open(self.global_config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
 
     # 既存互換性のため
     def load_config(self):
@@ -100,10 +133,11 @@ class HierarchicalConfigManager:
                 # ディレクトリから設定を読み込み
                 user_config = self.load_user_config_from_directory(user_id, display_name)
 
-                # 旧形式のAPI互換性のために変換
+                # 旧形式のAPI互換性のために変換（enabledフラグも含める）
                 users[user_id] = {
                     "user_id": user_id,
                     "display_name": display_name,
+                    "enabled": user_config.get("user_info", {}).get("enabled", True),
                     "description": user_config.get("user_info", {}).get("description", ""),
                     "tags": user_config.get("user_info", {}).get("tags", []),
                     "ai_analysis": user_config.get("ai_analysis", {}),
@@ -117,6 +151,40 @@ class HierarchicalConfigManager:
 
         return users
 
+    def _safe_save_user_config(self, user_id: str, update_func):
+        """汎用保存ロジック: 現在の設定を読み込み→更新関数適用→保存"""
+        try:
+            print(f"[DEBUG] _safe_save_user_config called for user {user_id}")
+            # ステップ1: 現在の完全な設定を読み込み
+            user_dirs = self.get_all_user_directories()
+            print(f"[DEBUG] Found {len(user_dirs)} user directories")
+
+            for user_dir in user_dirs:
+                if user_dir["user_id"] == user_id:
+                    display_name = user_dir["display_name"]
+                    print(f"[DEBUG] Found user directory: {display_name}")
+                    current_config = self.load_user_config_from_directory(user_id, display_name)
+                    print(f"[DEBUG] Loaded config with keys: {list(current_config.keys())}")
+
+                    # ステップ2: 更新関数を適用
+                    print(f"[DEBUG] Applying update function...")
+                    update_func(current_config)
+
+                    # ステップ3: 完全な設定を保存
+                    print(f"[DEBUG] Saving config to directory...")
+                    self.save_user_config_to_directory(user_id, display_name, current_config)
+                    self.notify_websocket_config_reload(user_id)
+                    print(f"[DEBUG] Safe save completed successfully")
+                    return True
+
+            print(f"[DEBUG] User {user_id} not found in directories")
+            return False
+        except Exception as e:
+            print(f"[ERROR] Safe save failed: {e}")
+            import traceback
+            print(f"[ERROR] Traceback: {traceback.format_exc()}")
+            return False
+
     def get_user_config(self, user_id: str) -> dict:
         """特定のユーザー設定を取得（新しい形式を優先）"""
         # まず新しい場所から読み込みを試行
@@ -127,10 +195,11 @@ class HierarchicalConfigManager:
                     display_name = user_dir["display_name"]
                     new_config = self.load_user_config_from_directory(user_id, display_name)
 
-                    # 旧形式との互換性のために変換
+                    # 旧形式との互換性のために変換（enabledフラグも含める）
                     return {
                         "user_id": user_id,
                         "display_name": display_name,
+                        "enabled": new_config.get("user_info", {}).get("enabled", True),
                         "description": new_config.get("user_info", {}).get("description", ""),
                         "tags": new_config.get("user_info", {}).get("tags", []),
                         "ai_analysis": new_config.get("ai_analysis", {}),
@@ -147,49 +216,67 @@ class HierarchicalConfigManager:
         return users.get(user_id, self.create_default_user_config(user_id))
 
     def save_user_config(self, user_id: str, user_config: dict):
-        """ユーザー設定を保存（新しい形式に移行）"""
-        print(f"[DEBUG] save_user_config called: user_id={user_id}")
-        print(f"[DEBUG] user_config structure: {list(user_config.keys())}")
-
+        """ユーザー設定を保存"""
         # display_nameを取得（新旧両方の構造に対応）
         if "user_info" in user_config:
             display_name = user_config["user_info"].get("display_name", f"ユーザー{user_id}")
         else:
             display_name = user_config.get("display_name", f"ユーザー{user_id}")
 
-        print(f"[DEBUG] extracted display_name: {display_name}")
+        def update_user_config(config):
+            if "user_info" in user_config:
+                # 新形式からの更新
+                if "user_info" in user_config:
+                    config["user_info"].update(user_config["user_info"])
+                if "ai_analysis" in user_config:
+                    config["ai_analysis"].update(user_config["ai_analysis"])
+                if "default_response" in user_config:
+                    config["default_response"].update(user_config["default_response"])
+                if "special_triggers" in user_config:
+                    config["special_triggers"] = user_config["special_triggers"]
+                # broadcasters は明示的に指定された場合のみ更新
+                if "broadcasters" in user_config:
+                    config["broadcasters"].update(user_config["broadcasters"])
+            else:
+                # 旧形式からの変換更新
+                config["user_info"]["display_name"] = display_name
+                config["user_info"]["description"] = user_config.get("description", "")
+                config["user_info"]["tags"] = user_config.get("tags", [])
+                if "ai_analysis" in user_config:
+                    config["ai_analysis"].update(user_config["ai_analysis"])
+                if "default_response" in user_config:
+                    config["default_response"].update(user_config["default_response"])
+                if "special_triggers" in user_config:
+                    config["special_triggers"] = user_config["special_triggers"]
 
-        # 既に新しい形式の場合はそのまま保存
-        if "user_info" in user_config:
-            print(f"[DEBUG] Already in new format, saving directly")
-            self.save_user_config_to_directory(user_id, display_name, user_config)
-            return
-
-        # 新しい形式に変換
-        print(f"[DEBUG] Converting to new format")
-        new_config = {
-            "user_info": {
-                "user_id": user_id,
-                "display_name": display_name,
-                "description": user_config.get("description", ""),
-                "tags": user_config.get("tags", [])
-            },
-            "ai_analysis": user_config.get("ai_analysis", {
-                "enabled": True,
-                "model": "openai-gpt4o",
-                "use_default_prompt": True,
-                "custom_prompt": ""
-            }),
-            "default_response": user_config.get("default_response", {}),
-            "broadcasters": user_config.get("broadcasters", {}),
-            "special_triggers": user_config.get("special_triggers", []),
-        }
-
-        # ディレクトリベースに保存
-        self.save_user_config_to_directory(user_id, display_name, new_config)
-
-        # WebSocketサーバーに設定再読み込みを通知
-        self.notify_websocket_config_reload(user_id)
+        success = self._safe_save_user_config(user_id, update_user_config)
+        if not success:
+            # フォールバック: 新規ユーザーの場合は直接作成
+            print(f"[WARNING] Creating new user config for {user_id}")
+            new_config = {
+                "user_info": {
+                    "user_id": user_id,
+                    "display_name": display_name,
+                    "description": user_config.get("description", ""),
+                    "tags": user_config.get("tags", [])
+                },
+                "ai_analysis": user_config.get("ai_analysis", {
+                    "enabled": True,
+                    "model": "openai-gpt4o",
+                    "use_default_prompt": True,
+                    "custom_prompt": ""
+                }),
+                "default_response": user_config.get("default_response", {}),
+                "broadcasters": user_config.get("broadcasters", {}),
+                "special_triggers": user_config.get("special_triggers", []),
+                "metadata": {
+                    "created_at": datetime.now().isoformat(),
+                    "updated_at": datetime.now().isoformat(),
+                    "config_version": "5.0"
+                }
+            }
+            self.save_user_config_to_directory(user_id, display_name, new_config)
+            self.notify_websocket_config_reload(user_id)
 
     def delete_user_config(self, user_id: str):
         """ユーザー設定を削除（ディレクトリベース）"""
@@ -275,20 +362,35 @@ class HierarchicalConfigManager:
 
     def save_broadcaster_config(self, user_id: str, broadcaster_id: str, broadcaster_config: dict):
         """配信者設定を保存"""
-        user_config = self.get_user_config(user_id)
-        if "broadcasters" not in user_config:
-            user_config["broadcasters"] = {}
+        def update_broadcaster(config):
+            if "broadcasters" not in config:
+                config["broadcasters"] = {}
+            config["broadcasters"][broadcaster_id] = broadcaster_config
 
-        user_config["broadcasters"][broadcaster_id] = broadcaster_config
-        self.save_user_config(user_id, user_config)
+        success = self._safe_save_user_config(user_id, update_broadcaster)
+        if not success:
+            print(f"[WARNING] Fallback save for broadcaster {broadcaster_id}")
+            user_config = self.get_user_config(user_id)
+            if "broadcasters" not in user_config:
+                user_config["broadcasters"] = {}
+            user_config["broadcasters"][broadcaster_id] = broadcaster_config
+            self.save_user_config(user_id, user_config)
 
     def delete_broadcaster_config(self, user_id: str, broadcaster_id: str):
         """配信者設定を削除"""
-        user_config = self.get_user_config(user_id)
-        broadcasters = user_config.get("broadcasters", {})
-        if broadcaster_id in broadcasters:
-            del broadcasters[broadcaster_id]
-            self.save_user_config(user_id, user_config)
+        def delete_broadcaster(config):
+            broadcasters = config.get("broadcasters", {})
+            if broadcaster_id in broadcasters:
+                del broadcasters[broadcaster_id]
+
+        success = self._safe_save_user_config(user_id, delete_broadcaster)
+        if not success:
+            print(f"[WARNING] Fallback delete for broadcaster {broadcaster_id}")
+            user_config = self.get_user_config(user_id)
+            broadcasters = user_config.get("broadcasters", {})
+            if broadcaster_id in broadcasters:
+                del broadcasters[broadcaster_id]
+                self.save_user_config(user_id, user_config)
 
     def create_default_broadcaster_config(self, broadcaster_id: str, broadcaster_name: str = None) -> dict:
         """デフォルト配信者設定を作成（グローバル設定を使用）"""
@@ -335,42 +437,91 @@ class HierarchicalConfigManager:
 
     def save_trigger_config(self, user_id: str, broadcaster_id: str, trigger_config: dict):
         """トリガー設定を保存"""
-        user_config = self.get_user_config(user_id)
+        print(f"[DEBUG] save_trigger_config called: user_id={user_id}, broadcaster_id={broadcaster_id}")
+        print(f"[DEBUG] trigger_config: {trigger_config}")
 
-        if "broadcasters" not in user_config:
-            user_config["broadcasters"] = {}
-        if broadcaster_id not in user_config["broadcasters"]:
-            user_config["broadcasters"][broadcaster_id] = self.create_default_broadcaster_config(broadcaster_id)
+        def update_trigger(config):
+            print(f"[DEBUG] update_trigger called with config keys: {list(config.keys())}")
 
-        triggers = user_config["broadcasters"][broadcaster_id].get("triggers", [])
+            if "broadcasters" not in config:
+                config["broadcasters"] = {}
+                print(f"[DEBUG] Created empty broadcasters section")
 
-        # IDが存在しない場合は生成
-        if "id" not in trigger_config:
-            trigger_config["id"] = str(uuid.uuid4())
+            if broadcaster_id not in config["broadcasters"]:
+                config["broadcasters"][broadcaster_id] = self.create_default_broadcaster_config(broadcaster_id)
+                print(f"[DEBUG] Created default broadcaster config for {broadcaster_id}")
 
-        # 既存トリガーを更新、なければ追加
-        trigger_found = False
-        for i, trigger in enumerate(triggers):
-            if trigger.get("id") == trigger_config["id"]:
-                triggers[i] = trigger_config
-                trigger_found = True
-                break
+            triggers = config["broadcasters"][broadcaster_id].get("triggers", [])
+            print(f"[DEBUG] Current triggers count: {len(triggers)}")
 
-        if not trigger_found:
-            triggers.append(trigger_config)
+            # IDが存在しない場合は生成
+            if "id" not in trigger_config:
+                trigger_config["id"] = str(uuid.uuid4())
+                print(f"[DEBUG] Generated new trigger ID: {trigger_config['id']}")
 
-        user_config["broadcasters"][broadcaster_id]["triggers"] = triggers
-        self.save_user_config(user_id, user_config)
+            # 既存トリガーを更新、なければ追加
+            trigger_found = False
+            for i, trigger in enumerate(triggers):
+                if trigger.get("id") == trigger_config["id"]:
+                    triggers[i] = trigger_config
+                    trigger_found = True
+                    print(f"[DEBUG] Updated existing trigger at index {i}")
+                    break
+
+            if not trigger_found:
+                triggers.append(trigger_config)
+                print(f"[DEBUG] Added new trigger, total triggers: {len(triggers)}")
+
+            config["broadcasters"][broadcaster_id]["triggers"] = triggers
+            print(f"[DEBUG] Final triggers count: {len(config['broadcasters'][broadcaster_id]['triggers'])}")
+
+        success = self._safe_save_user_config(user_id, update_trigger)
+        print(f"[DEBUG] safe_save_user_config result: {success}")
+
+        if not success:
+            print(f"[WARNING] Fallback save for trigger {broadcaster_id}")
+            user_config = self.get_user_config(user_id)
+            if "broadcasters" not in user_config:
+                user_config["broadcasters"] = {}
+            if broadcaster_id not in user_config["broadcasters"]:
+                user_config["broadcasters"][broadcaster_id] = self.create_default_broadcaster_config(broadcaster_id)
+
+            triggers = user_config["broadcasters"][broadcaster_id].get("triggers", [])
+
+            if "id" not in trigger_config:
+                trigger_config["id"] = str(uuid.uuid4())
+
+            trigger_found = False
+            for i, trigger in enumerate(triggers):
+                if trigger.get("id") == trigger_config["id"]:
+                    triggers[i] = trigger_config
+                    trigger_found = True
+                    break
+
+            if not trigger_found:
+                triggers.append(trigger_config)
+
+            user_config["broadcasters"][broadcaster_id]["triggers"] = triggers
+            self.save_user_config(user_id, user_config)
+            print(f"[DEBUG] Fallback save completed")
 
     def delete_trigger_config(self, user_id: str, broadcaster_id: str, trigger_id: str):
         """トリガー設定を削除"""
-        user_config = self.get_user_config(user_id)
-        broadcaster_config = user_config.get("broadcasters", {}).get(broadcaster_id, {})
-        triggers = broadcaster_config.get("triggers", [])
+        def delete_trigger(config):
+            broadcaster_config = config.get("broadcasters", {}).get(broadcaster_id, {})
+            triggers = broadcaster_config.get("triggers", [])
+            triggers = [t for t in triggers if t.get("id") != trigger_id]
+            config["broadcasters"][broadcaster_id]["triggers"] = triggers
 
-        triggers = [t for t in triggers if t.get("id") != trigger_id]
-        user_config["broadcasters"][broadcaster_id]["triggers"] = triggers
-        self.save_user_config(user_id, user_config)
+        success = self._safe_save_user_config(user_id, delete_trigger)
+        if not success:
+            print(f"[WARNING] Fallback delete for trigger {trigger_id}")
+            user_config = self.get_user_config(user_id)
+            broadcaster_config = user_config.get("broadcasters", {}).get(broadcaster_id, {})
+            triggers = broadcaster_config.get("triggers", [])
+            triggers = [t for t in triggers if t.get("id") != trigger_id]
+            user_config["broadcasters"][broadcaster_id]["triggers"] = triggers
+            self.save_user_config(user_id, user_config)
 
     def create_default_trigger_config(self, name: str = "新しいトリガー") -> dict:
         """デフォルトトリガー設定を作成"""
@@ -396,36 +547,60 @@ class HierarchicalConfigManager:
         return user_config.get("special_triggers", [])
 
     def save_special_trigger_config(self, user_id: str, trigger_config: dict):
-        """スペシャルトリガー設定を保存"""
-        user_config = self.get_user_config(user_id)
-        special_triggers = user_config.get("special_triggers", [])
+        """スペシャルトリガー設定を保存（汎用ロジック使用）"""
+        def update_special_trigger(config):
+            special_triggers = config.get("special_triggers", [])
 
-        # IDが存在しない場合は生成
-        if "id" not in trigger_config:
-            trigger_config["id"] = str(uuid.uuid4())
+            # IDが存在しない場合は生成
+            if "id" not in trigger_config:
+                trigger_config["id"] = str(uuid.uuid4())
 
-        # 既存トリガーを更新、なければ追加
-        trigger_found = False
-        for i, trigger in enumerate(special_triggers):
-            if trigger.get("id") == trigger_config["id"]:
-                special_triggers[i] = trigger_config
-                trigger_found = True
-                break
+            # 既存トリガーを更新、なければ追加
+            trigger_found = False
+            for i, trigger in enumerate(special_triggers):
+                if trigger.get("id") == trigger_config["id"]:
+                    special_triggers[i] = trigger_config
+                    trigger_found = True
+                    break
 
-        if not trigger_found:
-            special_triggers.append(trigger_config)
+            if not trigger_found:
+                special_triggers.append(trigger_config)
 
-        user_config["special_triggers"] = special_triggers
-        self.save_user_config(user_id, user_config)
+            config["special_triggers"] = special_triggers
+
+        success = self._safe_save_user_config(user_id, update_special_trigger)
+        if not success:
+            # フォールバック
+            user_config = self.get_user_config(user_id)
+            special_triggers = user_config.get("special_triggers", [])
+            if "id" not in trigger_config:
+                trigger_config["id"] = str(uuid.uuid4())
+            trigger_found = False
+            for i, trigger in enumerate(special_triggers):
+                if trigger.get("id") == trigger_config["id"]:
+                    special_triggers[i] = trigger_config
+                    trigger_found = True
+                    break
+            if not trigger_found:
+                special_triggers.append(trigger_config)
+            user_config["special_triggers"] = special_triggers
+            self.save_user_config(user_id, user_config)
 
     def delete_special_trigger_config(self, user_id: str, trigger_id: str):
-        """スペシャルトリガー設定を削除"""
-        user_config = self.get_user_config(user_id)
-        special_triggers = user_config.get("special_triggers", [])
+        """スペシャルトリガー設定を削除（汎用ロジック使用）"""
+        def delete_special_trigger(config):
+            special_triggers = config.get("special_triggers", [])
+            special_triggers = [t for t in special_triggers if t.get("id") != trigger_id]
+            config["special_triggers"] = special_triggers
 
-        special_triggers = [t for t in special_triggers if t.get("id") != trigger_id]
-        user_config["special_triggers"] = special_triggers
-        self.save_user_config(user_id, user_config)
+        success = self._safe_save_user_config(user_id, delete_special_trigger)
+        if not success:
+            # フォールバック
+            user_config = self.get_user_config(user_id)
+            special_triggers = user_config.get("special_triggers", [])
+            special_triggers = [t for t in special_triggers if t.get("id") != trigger_id]
+            user_config["special_triggers"] = special_triggers
+            self.save_user_config(user_id, user_config)
 
     # 処理済みXML管理（既存互換性）
     def load_processed_xmls(self):

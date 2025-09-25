@@ -174,6 +174,10 @@ class BroadcasterEditDialog:
         if not messages:
             messages = [f">>{'{no}'} {broadcaster_name}での挨拶です"]
 
+        # 最新のトリガー情報を取得
+        current_triggers = self.config_manager.get_broadcaster_triggers(self.user_id, broadcaster_id)
+        print(f"[GUI DEBUG] Current triggers count: {len(current_triggers)}")
+
         # 設定を作成
         broadcaster_config = {
             "broadcaster_id": broadcaster_id,
@@ -187,8 +191,9 @@ class BroadcasterEditDialog:
                 "max_reactions_per_stream": int(self.max_reactions_var.get() or 1),
                 "response_delay_seconds": int(self.delay_var.get() or 0)
             },
-            "triggers": self.broadcaster_config.get("triggers", [])
+            "triggers": current_triggers  # 最新のトリガー情報を使用
         }
+        print(f"[GUI DEBUG] Saving broadcaster config with {len(current_triggers)} triggers")
 
         self.config_manager.save_broadcaster_config(self.user_id, broadcaster_id, broadcaster_config)
         self.result = True
@@ -393,19 +398,24 @@ class BroadcasterEditDialog:
         item_values = self.triggers_tree.item(selection[0], "values")
         trigger_name = item_values[0]
 
+        # トリガーIDを取得（TreeViewのitemからIDを取得）
+        trigger_id = None
+        triggers = self.config_manager.get_broadcaster_triggers(self.user_id, broadcaster_id)
+        for trigger in triggers:
+            if trigger.get("name", "") == trigger_name:
+                trigger_id = trigger.get("id")
+                break
+
+        if not trigger_id:
+            log_to_gui("トリガーIDが見つかりませんでした")
+            return
+
         # 確認ダイアログ
         if msgbox.askyesno("確認", f"トリガー '{trigger_name}' を削除しますか？"):
-            user_config = self.config_manager.get_user_config(self.user_id)
-            broadcasters = user_config.get("broadcasters", {})
-            if broadcaster_id in broadcasters:
-                triggers = broadcasters[broadcaster_id].get("triggers", [])
-                # 名前でトリガーを検索して削除
-                updated_triggers = [t for t in triggers if t.get("name", "") != trigger_name]
-                broadcasters[broadcaster_id]["triggers"] = updated_triggers
-                user_config["broadcasters"] = broadcasters
-                self.config_manager.save_user_config(self.user_id, user_config)
-                self.refresh_triggers_list()
-                log_to_gui(f"トリガー '{trigger_name}' を削除しました")
+            # 汎用削除メソッドを使用
+            self.config_manager.delete_trigger_config(self.user_id, broadcaster_id, trigger_id)
+            self.refresh_triggers_list()
+            log_to_gui(f"トリガー '{trigger_name}' を削除しました")
 
     def on_trigger_click(self, event):
         """トリガーのチェックボックスクリック処理"""
@@ -423,25 +433,31 @@ class BroadcasterEditDialog:
             item_values = self.triggers_tree.item(item, "values")
             trigger_name = item_values[0]
 
-            # 現在の状態を取得し、切り替える
-            user_config = self.config_manager.get_user_config(self.user_id)
-            broadcasters = user_config.get("broadcasters", {})
-            if broadcaster_id in broadcasters:
-                triggers = broadcasters[broadcaster_id].get("triggers", [])
-                # 名前でトリガーを検索して有効/無効を切り替える
-                for trigger in triggers:
-                    if trigger.get("name", "") == trigger_name:
-                        current_enabled = trigger.get("enabled", True)
-                        new_enabled = not current_enabled
-                        trigger["enabled"] = new_enabled
-                        break
+            # 汎用保存ロジックを使用してトリガー状態を更新
+            def update_trigger_enabled(config):
+                broadcasters = config.get("broadcasters", {})
+                if broadcaster_id in broadcasters:
+                    triggers = broadcasters[broadcaster_id].get("triggers", [])
+                    for trigger in triggers:
+                        if trigger.get("name", "") == trigger_name:
+                            current_enabled = trigger.get("enabled", True)
+                            new_enabled = not current_enabled
+                            trigger["enabled"] = new_enabled
+                            return new_enabled
+                return None
 
-                broadcasters[broadcaster_id]["triggers"] = triggers
-                user_config["broadcasters"] = broadcasters
-                self.config_manager.save_user_config(self.user_id, user_config)
+            result = None
+            def wrapper_update(config):
+                nonlocal result
+                result = update_trigger_enabled(config)
+                return result is not None
+
+            if self.config_manager._safe_save_user_config(self.user_id, wrapper_update):
                 self.refresh_triggers_list()
-                action = "有効" if new_enabled else "無効"
+                action = "有効" if result else "無効"
                 log_to_gui(f"トリガー '{trigger_name}' を{action}にしました")
+            else:
+                log_to_gui("トリガー設定の更新に失敗しました")
 
     def enable_all_triggers(self):
         """すべてのトリガーを有効化"""
@@ -458,25 +474,23 @@ class BroadcasterEditDialog:
             log_to_gui("配信者IDが設定されていません")
             return
 
-        user_config = self.config_manager.get_user_config(self.user_id)
-        broadcasters = user_config.get("broadcasters", {})
+        # 汎用保存ロジックを使用して一括更新
+        def update_all_triggers_enabled(config):
+            broadcasters = config.get("broadcasters", {})
+            if broadcaster_id not in broadcasters:
+                return False
+            triggers = broadcasters[broadcaster_id].get("triggers", [])
+            if not triggers:
+                return False
+            # すべてのトリガーの設定を更新
+            for trigger in triggers:
+                trigger["enabled"] = enabled
+            config["broadcasters"][broadcaster_id]["triggers"] = triggers
+            return True
 
-        if broadcaster_id not in broadcasters:
-            log_to_gui("配信者が見つかりません")
-            return
-
-        triggers = broadcasters[broadcaster_id].get("triggers", [])
-        if not triggers:
-            log_to_gui("トリガーが設定されていません")
-            return
-
-        # すべてのトリガーの設定を更新
-        for trigger in triggers:
-            trigger["enabled"] = enabled
-
-        broadcasters[broadcaster_id]["triggers"] = triggers
-        user_config["broadcasters"] = broadcasters
-        self.config_manager.save_user_config(self.user_id, user_config)
-        self.refresh_triggers_list()
-        action = "有効" if enabled else "無効"
-        log_to_gui(f"すべてのトリガーを{action}にしました")
+        if self.config_manager._safe_save_user_config(self.user_id, update_all_triggers_enabled):
+            self.refresh_triggers_list()
+            action = "有効" if enabled else "無効"
+            log_to_gui(f"すべてのトリガーを{action}にしました")
+        else:
+            log_to_gui("トリガー設定の更新に失敗しました")

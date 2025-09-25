@@ -83,20 +83,20 @@ class BroadcasterManagementDialog:
         triggers_frame = ttk.LabelFrame(right_frame, text="選択された配信者のトリガー一覧", padding="5")
         triggers_frame.pack(fill=tk.BOTH, expand=True)
 
-        # トリガー一覧Treeview
+        # トリガー一覧Treeview（チェックボックス列を追加）
         self.triggers_tree = ttk.Treeview(
             triggers_frame,
-            columns=("trigger_name", "enabled", "keywords", "response_type"),
-            show="headings",
+            columns=("trigger_name", "keywords", "response_type"),
+            show="tree headings",
             height=15
         )
+        self.triggers_tree.heading("#0", text="有効")
         self.triggers_tree.heading("trigger_name", text="トリガー名")
-        self.triggers_tree.heading("enabled", text="有効")
         self.triggers_tree.heading("keywords", text="キーワード")
         self.triggers_tree.heading("response_type", text="応答タイプ")
 
+        self.triggers_tree.column("#0", width=60)
         self.triggers_tree.column("trigger_name", width=120)
-        self.triggers_tree.column("enabled", width=50)
         self.triggers_tree.column("keywords", width=150)
         self.triggers_tree.column("response_type", width=80)
 
@@ -104,6 +104,8 @@ class BroadcasterManagementDialog:
 
         # ダブルクリックでトリガー管理画面へ
         self.triggers_tree.bind("<Double-1>", self.on_trigger_double_click)
+        # チェックボックスクリックイベント
+        self.triggers_tree.bind("<Button-1>", self.on_trigger_click)
 
         # 配信者選択でトリガー一覧更新
         self.broadcasters_tree.bind("<<TreeviewSelect>>", self.on_broadcaster_select)
@@ -142,7 +144,8 @@ class BroadcasterManagementDialog:
         # トリガー一覧を表示
         for trigger in triggers:
             trigger_name = trigger.get("name", "無名トリガー")
-            enabled = "有効" if trigger.get("enabled", True) else "無効"
+            enabled = trigger.get("enabled", True)
+            checkbox = "☑" if enabled else "☐"
             keywords = ", ".join(trigger.get("keywords", [])[:3])  # 最初の3つのキーワードを表示
             if len(trigger.get("keywords", [])) > 3:
                 keywords += "..."
@@ -151,7 +154,8 @@ class BroadcasterManagementDialog:
             self.triggers_tree.insert(
                 "",
                 tk.END,
-                values=(trigger_name, enabled, keywords, response_type)
+                text=checkbox,
+                values=(trigger_name, keywords, response_type)
             )
 
     def on_trigger_double_click(self, event):
@@ -181,6 +185,65 @@ class BroadcasterManagementDialog:
 
         # ダイアログが閉じられた後、トリガー一覧を更新
         self.refresh_triggers_for_selected_broadcaster()
+
+    def on_trigger_click(self, event):
+        """トリガーのチェックボックスクリック処理"""
+        item = self.triggers_tree.identify('item', event.x, event.y)
+        column = self.triggers_tree.identify('column', event.x, event.y)
+
+        # チェックボックス列（#0）がクリックされた場合
+        if item and column == "#0":
+            # 選択された配信者を取得
+            broadcaster_selection = self.broadcasters_tree.selection()
+            if not broadcaster_selection:
+                log_to_gui("配信者が選択されていません")
+                return
+
+            broadcaster_item = self.broadcasters_tree.item(broadcaster_selection[0])
+            broadcaster_id = broadcaster_item["values"][0] if broadcaster_item["values"] else None
+
+            if not broadcaster_id:
+                log_to_gui("配信者IDが取得できません")
+                return
+
+            # 選択されたトリガーの情報を取得
+            item_values = self.triggers_tree.item(item, "values")
+            trigger_name = item_values[0]
+
+            # トリガーのインデックスを取得
+            triggers = self.config_manager.get_broadcaster_triggers(self.user_id, broadcaster_id)
+            trigger_index = None
+            for i, trigger in enumerate(triggers):
+                if trigger.get("name") == trigger_name:
+                    trigger_index = i
+                    break
+
+            if trigger_index is not None:
+                # 現在の有効状態を切り替え
+                current_enabled = triggers[trigger_index].get("enabled", True)
+                new_enabled = not current_enabled
+                triggers[trigger_index]["enabled"] = new_enabled
+
+                # トリガー設定を更新
+                trigger_config = triggers[trigger_index].copy()
+
+                # 汎用保存ロジックを使用してトリガーを更新
+                def update_trigger_enabled(config):
+                    broadcasters = config.get("broadcasters", {})
+                    if broadcaster_id in broadcasters:
+                        broadcaster_triggers = broadcasters[broadcaster_id].get("triggers", [])
+                        if trigger_index < len(broadcaster_triggers):
+                            broadcaster_triggers[trigger_index]["enabled"] = new_enabled
+                            config["broadcasters"][broadcaster_id]["triggers"] = broadcaster_triggers
+                            return True
+                    return False
+
+                if self.config_manager._safe_save_user_config(self.user_id, update_trigger_enabled):
+                    self.refresh_triggers_for_selected_broadcaster()
+                    action = "有効" if new_enabled else "無効"
+                    log_to_gui(f"トリガー '{trigger_name}' を{action}にしました")
+                else:
+                    log_to_gui("トリガー設定の更新に失敗しました")
 
     def refresh_broadcasters_list(self):
         """配信者一覧を更新"""

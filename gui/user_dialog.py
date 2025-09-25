@@ -14,10 +14,12 @@ from .simple_dialogs import SimpleBroadcasterEditDialog
 
 class UserEditDialog:
     def __init__(self, parent, config_manager, user_id=None):
+        print(f"[DEBUG] UserEditDialog.__init__() 開始: user_id={user_id}")
         self.result = False
         self.config_manager = config_manager
         self.user_id = user_id
         self.user_config = config_manager.get_user_config(user_id) if user_id else config_manager.create_default_user_config("")
+        print(f"[DEBUG] ユーザー設定読み込み完了: keys={list(self.user_config.keys())}")
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("スペシャルユーザー編集" if user_id else "スペシャルユーザー追加")
@@ -25,6 +27,7 @@ class UserEditDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
+        print("[DEBUG] UserEditDialog ダイアログセットアップ開始")
         self.setup_dialog()
 
     def setup_dialog(self):
@@ -56,6 +59,9 @@ class UserEditDialog:
         self.display_name_var = tk.StringVar(value=self.user_config.get("display_name", ""))
         ttk.Entry(basic_frame, textvariable=self.display_name_var).grid(row=1, column=1, sticky=(tk.W, tk.E), pady=2)
 
+        self.user_enabled_var = tk.BooleanVar(value=self.user_config.get("enabled", True))
+        ttk.Checkbutton(basic_frame, text="有効", variable=self.user_enabled_var).grid(row=2, column=1, sticky=tk.W, pady=2)
+
         basic_frame.columnconfigure(1, weight=1)
 
         # AI分析設定
@@ -72,6 +78,10 @@ class UserEditDialog:
         # デフォルト応答設定
         response_frame = ttk.LabelFrame(left_frame, text="デフォルト応答設定", padding="5")
         response_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # デフォルト応答有効チェックボックス
+        self.default_response_enabled_var = tk.BooleanVar(value=self.user_config.get("default_response", {}).get("enabled", True))
+        ttk.Checkbutton(response_frame, text="デフォルト応答を有効化", variable=self.default_response_enabled_var).pack(anchor=tk.W, pady=(0, 5))
 
         # 応答タイプ
         type_frame = ttk.Frame(response_frame)
@@ -106,7 +116,11 @@ class UserEditDialog:
 
         ttk.Label(reaction_frame, text="応答遅延(秒):").grid(row=0, column=2, sticky=tk.W)
         self.delay_var = tk.StringVar(value=str(self.user_config.get("default_response", {}).get("response_delay_seconds", 0)))
-        ttk.Entry(reaction_frame, textvariable=self.delay_var, width=10).grid(row=0, column=3, padx=(5, 0))
+        ttk.Entry(reaction_frame, textvariable=self.delay_var, width=10).grid(row=0, column=3, padx=(5, 10))
+
+        ttk.Label(reaction_frame, text="分割送信間隔(秒):").grid(row=0, column=4, sticky=tk.W)
+        self.split_delay_var = tk.StringVar(value=str(self.user_config.get("default_response", {}).get("response_split_delay_seconds", 1)))
+        ttk.Entry(reaction_frame, textvariable=self.split_delay_var, width=10).grid(row=0, column=5, padx=(5, 0))
 
         # スペシャルトリガー管理
         triggers_frame = ttk.LabelFrame(left_frame, text="スペシャルトリガー", padding="5")
@@ -268,12 +282,15 @@ class UserEditDialog:
         if not messages:
             messages = [f">>{'{no}'} こんにちは、{display_name}さん"]
 
-        # 設定を作成
+        # 設定を作成（新形式のuser_info構造を使用）
         user_config = {
-            "user_id": user_id,
-            "display_name": display_name,
-            "description": "",
-            "tags": [],
+            "user_info": {
+                "user_id": user_id,
+                "display_name": display_name,
+                "enabled": self.user_enabled_var.get(),
+                "description": "",
+                "tags": []
+            },
             "ai_analysis": {
                 "enabled": self.analysis_enabled_var.get(),
                 "model": self.analysis_model_var.get(),
@@ -281,11 +298,13 @@ class UserEditDialog:
                 "use_default_prompt": True
             },
             "default_response": {
+                "enabled": self.default_response_enabled_var.get(),
                 "response_type": self.response_type_var.get(),
                 "messages": messages,
                 "ai_response_prompt": self.ai_prompt_var.get(),
                 "max_reactions_per_stream": int(self.max_reactions_var.get() or 1),
-                "response_delay_seconds": int(self.delay_var.get() or 0)
+                "response_delay_seconds": int(self.delay_var.get() or 0),
+                "response_split_delay_seconds": float(self.split_delay_var.get() or 1)
             },
             "special_triggers": self.user_config.get("special_triggers", []),
             "broadcasters": self.user_config.get("broadcasters", {})
@@ -364,12 +383,20 @@ class UserEditDialog:
             if broadcaster_id in broadcasters:
                 current_enabled = broadcasters[broadcaster_id].get("enabled", True)
                 new_enabled = not current_enabled
-                broadcasters[broadcaster_id]["enabled"] = new_enabled
-                user_config["broadcasters"] = broadcasters
-                self.config_manager.save_user_config(current_user_id, user_config)
-                self.refresh_broadcasters_list()
-                action = "有効" if new_enabled else "無効"
-                log_to_gui(f"配信者 '{broadcaster_name}' を{action}にしました")
+
+                # 汎用保存ロジックを使用
+                def update_broadcaster_enabled(config):
+                    broadcasters = config.get("broadcasters", {})
+                    if broadcaster_id in broadcasters:
+                        broadcasters[broadcaster_id]["enabled"] = new_enabled
+                        config["broadcasters"] = broadcasters
+
+                if self.config_manager._safe_save_user_config(current_user_id, update_broadcaster_enabled):
+                    self.refresh_broadcasters_list()
+                    action = "有効" if new_enabled else "無効"
+                    log_to_gui(f"配信者 '{broadcaster_name}' を{action}にしました")
+                else:
+                    log_to_gui("配信者の設定更新に失敗しました")
 
     def enable_all_broadcasters(self):
         """すべての配信者を有効化"""
@@ -386,19 +413,20 @@ class UserEditDialog:
             log_to_gui("ユーザーIDが設定されていません")
             return
 
-        user_config = self.config_manager.get_user_config(current_user_id)
-        broadcasters = user_config.get("broadcasters", {})
+        # 汎用保存ロジックを使用
+        def update_all_broadcasters_enabled(config):
+            broadcasters = config.get("broadcasters", {})
+            if not broadcasters:
+                return False
+            # すべての配信者の設定を更新
+            for broadcaster_id, broadcaster_info in broadcasters.items():
+                broadcaster_info["enabled"] = enabled
+            config["broadcasters"] = broadcasters
+            return True
 
-        if not broadcasters:
-            log_to_gui("配信者が設定されていません")
-            return
-
-        # すべての配信者の設定を更新
-        for broadcaster_id, broadcaster_info in broadcasters.items():
-            broadcaster_info["enabled"] = enabled
-
-        user_config["broadcasters"] = broadcasters
-        self.config_manager.save_user_config(current_user_id, user_config)
-        self.refresh_broadcasters_list()
-        action = "有効" if enabled else "無効"
-        log_to_gui(f"すべての配信者を{action}にしました")
+        if self.config_manager._safe_save_user_config(current_user_id, update_all_broadcasters_enabled):
+            self.refresh_broadcasters_list()
+            action = "有効" if enabled else "無効"
+            log_to_gui(f"すべての配信者を{action}にしました")
+        else:
+            log_to_gui("配信者設定の更新に失敗しました")

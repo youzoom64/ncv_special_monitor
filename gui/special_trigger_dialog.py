@@ -241,6 +241,9 @@ class SpecialTriggerManagementDialog:
 
 class SpecialTriggerEditDialog:
     def __init__(self, parent, config_manager, user_id, trigger_id=None):
+        print(f"[GUI DEBUG] SpecialTriggerEditDialog.__init__ called:")
+        print(f"[GUI DEBUG]   user_id: {user_id}")
+        print(f"[GUI DEBUG]   trigger_id: {trigger_id}")
         self.result = False
         self.config_manager = config_manager
         self.user_id = user_id
@@ -264,7 +267,7 @@ class SpecialTriggerEditDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("スペシャルトリガー編集" if trigger_id else "スペシャルトリガー追加")
-        self.dialog.geometry("500x500")
+        self.dialog.geometry("500x600")
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -355,9 +358,12 @@ class SpecialTriggerEditDialog:
 
     def save_trigger(self):
         """トリガー保存"""
+        print(f"[GUI DEBUG] SpecialTriggerEditDialog.save_trigger() method called")
         trigger_name = self.trigger_name_var.get().strip()
+        print(f"[GUI DEBUG] special trigger_name: '{trigger_name}'")
 
         if not trigger_name:
+            print(f"[GUI DEBUG] special trigger_name is empty, returning")
             log_to_gui("トリガー名を入力してください")
             return
 

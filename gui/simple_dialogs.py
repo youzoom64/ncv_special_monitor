@@ -23,6 +23,7 @@ class SimpleBroadcasterEditDialog:
             user_config = config_manager.get_user_config(user_id)
             broadcasters = user_config.get("broadcasters", {})
             self.broadcaster_config = broadcasters.get(broadcaster_id, {})
+            print(f"[GUI DEBUG] Loading broadcaster config for {broadcaster_id}: enabled={self.broadcaster_config.get('enabled', True)}")
         else:
             self.broadcaster_config = {}
 
@@ -52,13 +53,30 @@ class SimpleBroadcasterEditDialog:
         self.broadcaster_name_var = tk.StringVar(value=self.broadcaster_config.get("broadcaster_name", ""))
         ttk.Entry(main_frame, textvariable=self.broadcaster_name_var, width=30).grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
 
-        self.enabled_var = tk.BooleanVar(value=self.broadcaster_config.get("enabled", True))
+        current_enabled = self.broadcaster_config.get("enabled", True)
+        print(f"[GUI DEBUG] SimpleBroadcasterEditDialog: Setting enabled checkbox to {current_enabled}")
+        self.enabled_var = tk.BooleanVar(value=current_enabled)
         ttk.Checkbutton(main_frame, text="有効", variable=self.enabled_var).grid(row=2, column=1, sticky=tk.W, padx=(5, 0), pady=5)
 
+        # 最大反応回数
+        ttk.Label(main_frame, text="最大反応回数:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.max_reactions_var = tk.IntVar(value=self.broadcaster_config.get("default_response", {}).get("max_reactions_per_stream", 1))
+        ttk.Entry(main_frame, textvariable=self.max_reactions_var, width=10).grid(row=3, column=1, sticky=tk.W, padx=(5, 0), pady=5)
+
+        # 応答遅延
+        ttk.Label(main_frame, text="応答遅延(秒):").grid(row=4, column=0, sticky=tk.W, pady=5)
+        self.response_delay_var = tk.DoubleVar(value=self.broadcaster_config.get("default_response", {}).get("response_delay_seconds", 0))
+        ttk.Entry(main_frame, textvariable=self.response_delay_var, width=10).grid(row=4, column=1, sticky=tk.W, padx=(5, 0), pady=5)
+
+        # 分割送信間隔
+        ttk.Label(main_frame, text="分割送信間隔(秒):").grid(row=5, column=0, sticky=tk.W, pady=5)
+        self.split_delay_var = tk.DoubleVar(value=self.broadcaster_config.get("default_response", {}).get("response_split_delay_seconds", 1))
+        ttk.Entry(main_frame, textvariable=self.split_delay_var, width=10).grid(row=5, column=1, sticky=tk.W, padx=(5, 0), pady=5)
+
         # 定型メッセージ
-        ttk.Label(main_frame, text="定型メッセージ:").grid(row=3, column=0, sticky=tk.NW, pady=5)
+        ttk.Label(main_frame, text="定型メッセージ:").grid(row=6, column=0, sticky=tk.NW, pady=5)
         self.messages_text = tk.Text(main_frame, height=4, width=30)
-        self.messages_text.grid(row=3, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0), pady=5)
+        self.messages_text.grid(row=6, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0), pady=5)
 
         # デフォルトメッセージを設定
         default_messages = self.broadcaster_config.get("default_response", {}).get("messages", [])
@@ -70,11 +88,11 @@ class SimpleBroadcasterEditDialog:
                 self.messages_text.insert("1.0", f">>{'{no}'} {broadcaster_name}での挨拶です")
 
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(3, weight=1)
+        main_frame.rowconfigure(6, weight=1)
 
         # ボタン
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        button_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
 
         ttk.Button(button_frame, text="保存", command=self.save_broadcaster).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(button_frame, text="キャンセル", command=self.cancel).pack(side=tk.LEFT)
@@ -83,6 +101,9 @@ class SimpleBroadcasterEditDialog:
         """配信者保存"""
         broadcaster_id = self.broadcaster_id_var.get().strip()
         broadcaster_name = self.broadcaster_name_var.get().strip()
+        enabled = self.enabled_var.get()
+
+        print(f"[GUI DEBUG] SimpleBroadcasterEditDialog.save_broadcaster(): enabled={enabled}")
 
         if not broadcaster_id:
             log_to_gui("配信者IDを入力してください")
@@ -96,24 +117,47 @@ class SimpleBroadcasterEditDialog:
         if not messages:
             messages = [f">>{'{no}'} {broadcaster_name}での挨拶です"]
 
-        # 設定を作成
-        broadcaster_config = {
-            "broadcaster_id": broadcaster_id,
-            "broadcaster_name": broadcaster_name,
-            "enabled": self.enabled_var.get(),
-            "default_response": {
-                "response_type": "predefined",
-                "messages": messages,
-                "ai_response_prompt": f"{broadcaster_name}の配信に特化した親しみやすい返答をしてください",
-                "max_reactions_per_stream": 1,
-                "response_delay_seconds": 0
-            },
-            "triggers": self.broadcaster_config.get("triggers", [])
-        }
+        # 汎用保存ロジックを使用
+        def update_broadcaster(config):
+            broadcasters = config.get("broadcasters", {})
+            # 既存の配信者情報を保持しつつ更新
+            if broadcaster_id in broadcasters:
+                existing_broadcaster = broadcasters[broadcaster_id]
+                existing_broadcaster.update({
+                    "broadcaster_name": broadcaster_name,
+                    "enabled": enabled,
+                    "default_response": {
+                        "response_type": "predefined",
+                        "messages": messages,
+                        "ai_response_prompt": f"{broadcaster_name}の配信に特化した親しみやすい返答をしてください",
+                        "max_reactions_per_stream": self.max_reactions_var.get(),
+                        "response_delay_seconds": self.response_delay_var.get(),
+                        "response_split_delay_seconds": self.split_delay_var.get()
+                    }
+                })
+            else:
+                broadcasters[broadcaster_id] = {
+                    "broadcaster_id": broadcaster_id,
+                    "broadcaster_name": broadcaster_name,
+                    "enabled": enabled,
+                    "default_response": {
+                        "response_type": "predefined",
+                        "messages": messages,
+                        "ai_response_prompt": f"{broadcaster_name}の配信に特化した親しみやすい返答をしてください",
+                        "max_reactions_per_stream": self.max_reactions_var.get(),
+                        "response_delay_seconds": self.response_delay_var.get(),
+                        "response_split_delay_seconds": self.split_delay_var.get()
+                    },
+                    "triggers": []
+                }
+            config["broadcasters"] = broadcasters
 
-        self.config_manager.save_broadcaster_config(self.user_id, broadcaster_id, broadcaster_config)
-        self.result = True
-        self.dialog.destroy()
+        if self.config_manager._safe_save_user_config(self.user_id, update_broadcaster):
+            print(f"[GUI DEBUG] SimpleBroadcasterEditDialog: Successfully saved broadcaster {broadcaster_id} with enabled={enabled}")
+            self.result = True
+            self.dialog.destroy()
+        else:
+            log_to_gui("配信者設定の保存に失敗しました")
 
     def cancel(self):
         self.dialog.destroy()
@@ -153,6 +197,11 @@ class SimpleBroadcasterEditDialog:
 class SimpleTriggerEditDialog:
     """トリガー追加用の簡単なダイアログ"""
     def __init__(self, parent, config_manager, user_id, broadcaster_id, broadcaster_name, trigger_index=None):
+        print(f"[GUI DEBUG] SimpleTriggerEditDialog.__init__ called:")
+        print(f"[GUI DEBUG]   user_id: {user_id}")
+        print(f"[GUI DEBUG]   broadcaster_id: {broadcaster_id}")
+        print(f"[GUI DEBUG]   broadcaster_name: {broadcaster_name}")
+        print(f"[GUI DEBUG]   trigger_index: {trigger_index}")
         self.result = False
         self.config_manager = config_manager
         self.user_id = user_id
@@ -223,21 +272,40 @@ class SimpleTriggerEditDialog:
         self.ai_prompt_var = tk.StringVar(value=self.trigger_config.get("ai_response_prompt", ""))
         ttk.Entry(main_frame, textvariable=self.ai_prompt_var, width=40).grid(row=5, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
 
+        # 反応設定
+        settings_frame = ttk.Frame(main_frame)
+        settings_frame.grid(row=6, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
+
+        ttk.Label(settings_frame, text="最大反応回数:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.max_reactions_var = tk.IntVar(value=self.trigger_config.get("max_reactions_per_stream", 1))
+        ttk.Entry(settings_frame, textvariable=self.max_reactions_var, width=8).grid(row=0, column=1, padx=(0, 10))
+
+        ttk.Label(settings_frame, text="応答遅延(秒):").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        self.response_delay_var = tk.DoubleVar(value=self.trigger_config.get("response_delay_seconds", 0))
+        ttk.Entry(settings_frame, textvariable=self.response_delay_var, width=8).grid(row=0, column=3, padx=(0, 10))
+
+        ttk.Label(settings_frame, text="分割送信間隔(秒):").grid(row=0, column=4, sticky=tk.W, padx=(0, 5))
+        self.split_delay_var = tk.DoubleVar(value=self.trigger_config.get("response_split_delay_seconds", 1))
+        ttk.Entry(settings_frame, textvariable=self.split_delay_var, width=8).grid(row=0, column=5)
+
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(2, weight=1)
         main_frame.rowconfigure(4, weight=1)
 
         # ボタン
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        button_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
 
         ttk.Button(button_frame, text="保存", command=self.save_trigger).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(button_frame, text="キャンセル", command=self.cancel).pack(side=tk.LEFT)
 
     def save_trigger(self):
         """トリガー保存"""
+        print(f"[GUI DEBUG] SimpleTriggerEditDialog.save_trigger() method called")
         trigger_name = self.trigger_name_var.get().strip()
+        print(f"[GUI DEBUG] simple trigger_name: '{trigger_name}'")
         if not trigger_name:
+            print(f"[GUI DEBUG] simple trigger_name is empty, returning")
             log_to_gui("トリガー名を入力してください")
             return
 
@@ -261,32 +329,28 @@ class SimpleTriggerEditDialog:
             "response_type": self.response_type_var.get(),
             "messages": messages,
             "ai_response_prompt": self.ai_prompt_var.get(),
-            "max_reactions_per_stream": 1,
-            "response_delay_seconds": 0,
+            "max_reactions_per_stream": self.max_reactions_var.get(),
+            "response_delay_seconds": self.response_delay_var.get(),
+            "response_split_delay_seconds": self.split_delay_var.get(),
             "firing_probability": 100
         }
 
-        # 配信者の設定を更新
-        user_config = self.config_manager.get_user_config(self.user_id)
-        broadcasters = user_config.get("broadcasters", {})
-
-        if self.broadcaster_id not in broadcasters:
-            log_to_gui("配信者が見つかりません")
-            return
-
-        triggers = broadcasters[self.broadcaster_id].get("triggers", [])
+        # 新しいsave_trigger_configメソッドを使用
+        print(f"[GUI DEBUG] Calling save_trigger_config...")
+        print(f"[GUI DEBUG]   user_id: {self.user_id}")
+        print(f"[GUI DEBUG]   broadcaster_id: {self.broadcaster_id}")
+        print(f"[GUI DEBUG]   trigger_config: {trigger_config}")
 
         if self.trigger_index is not None:
-            # 編集の場合
+            # 編集の場合: 既存のIDを保持
+            triggers = self.config_manager.get_broadcaster_triggers(self.user_id, self.broadcaster_id)
             if 0 <= self.trigger_index < len(triggers):
-                triggers[self.trigger_index] = trigger_config
-        else:
-            # 新規追加の場合
-            triggers.append(trigger_config)
+                existing_trigger = triggers[self.trigger_index]
+                trigger_config["id"] = existing_trigger.get("id")
+                print(f"[GUI DEBUG] Editing existing trigger with ID: {trigger_config.get('id')}")
 
-        broadcasters[self.broadcaster_id]["triggers"] = triggers
-        user_config["broadcasters"] = broadcasters
-        self.config_manager.save_user_config(self.user_id, user_config)
+        self.config_manager.save_trigger_config(self.user_id, self.broadcaster_id, trigger_config)
+        print(f"[GUI DEBUG] save_trigger_config call completed")
 
         self.result = True
         self.dialog.destroy()

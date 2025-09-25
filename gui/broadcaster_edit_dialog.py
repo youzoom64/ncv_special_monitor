@@ -107,6 +107,12 @@ class BroadcasterEditDialog:
         self.delay_var = tk.StringVar(value=str(self.broadcaster_config.get("default_response", {}).get("response_delay_seconds", 0)))
         ttk.Entry(reaction_frame, textvariable=self.delay_var, width=10).grid(row=0, column=3, padx=(5, 0))
 
+        ttk.Label(reaction_frame, text="分割送信間隔(秒):").grid(row=0, column=4, sticky=tk.W)
+        self.split_delay_var = tk.StringVar(
+            value=str(self.broadcaster_config.get("default_response", {}).get("response_split_delay_seconds", 1))
+        )
+        ttk.Entry(reaction_frame, textvariable=self.split_delay_var, width=10).grid(row=0, column=5, padx=(5, 0))
+
         # ボタン
         button_frame = ttk.Frame(left_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
@@ -189,7 +195,8 @@ class BroadcasterEditDialog:
                 "messages": messages,
                 "ai_response_prompt": self.ai_prompt_var.get(),
                 "max_reactions_per_stream": int(self.max_reactions_var.get() or 1),
-                "response_delay_seconds": int(self.delay_var.get() or 0)
+                "response_delay_seconds": int(self.delay_var.get() or 0),
+                "response_split_delay_seconds": int(self.split_delay_var.get() or 1)
             },
             "triggers": current_triggers  # 最新のトリガー情報を使用
         }

@@ -380,11 +380,17 @@ class NCVCommentServer:
                     # ユーザー設定を読み込み
                     user_config = self.config_manager.load_user_config_from_directory(user_id, display_name)
 
-                    # キャッシュに保存
+                    # 以前の reaction_count を保持
+                    old_reaction_count = 0
+                    if user_id in self.special_users_cache:
+                        old_reaction_count = self.special_users_cache[user_id].get("reaction_count", 0)
+
                     self.special_users_cache[user_id] = {
                         'config': user_config,
                         'display_name': display_name,
-                        'last_loaded': time.time()
+                        'last_loaded': time.time(),
+                        'reaction_count': old_reaction_count,
+                        'broadcaster_reaction_counts': {} # ←引き継ぎ
                     }
 
                     # 監視対象に追加
@@ -458,6 +464,44 @@ class NCVCommentServer:
             user_config = user_cache['config']
             self.logger.debug(f"[DEBUG] User config loaded for {user_id}")
 
+            # === 最大反応数チェック追加 ===
+            # ユーザー単位の反応カウントを取得
+            reaction_count = user_cache.get("reaction_count", 0)
+
+            # デフォルト応答の上限を取得（ユーザー単位）
+            default_response = user_config.get("default_response", {})
+            max_reactions = default_response.get("max_reactions_per_stream", 1)
+
+            if reaction_count >= max_reactions:
+                self.logger.debug(f"[DEBUG] Max reactions reached for user {user_id} ({reaction_count}/{max_reactions}), skipping response")
+                return None
+
+            # カウント更新
+            user_cache["reaction_count"] = reaction_count + 1
+
+
+            # === 配信者ごとの最大反応数チェック追加 ===
+            if active_broadcaster_id:
+                # 配信者ごとのカウントを取得
+                br_counts = user_cache.setdefault("broadcaster_reaction_counts", {})
+                br_count = br_counts.get(active_broadcaster_id, 0)
+
+                # 配信者デフォルト応答の上限を取得
+                br_default_response = active_broadcaster.get("default_response", {})
+                br_max_reactions = br_default_response.get("max_reactions_per_stream", 1)
+
+                if br_count >= br_max_reactions:
+                    self.logger.debug(
+                        f"[DEBUG] Max reactions reached for broadcaster {active_broadcaster_id} "
+                        f"({br_count}/{br_max_reactions}), skipping response"
+                    )
+                    return None
+
+                # カウント更新
+                br_counts[active_broadcaster_id] = br_count + 1
+
+
+
             # 最上位階層チェック: スペシャルユーザー自体が無効なら全て無効
             user_info_enabled = user_config.get('user_info', {}).get('enabled', True)
             overall_user_enabled = user_config.get('enabled', True)  # 直接形式もチェック
@@ -523,7 +567,22 @@ class NCVCommentServer:
                     self.logger.debug(f"[DEBUG] Trigger {i} disabled, skipping")
                     continue
 
-                self.logger.debug(f"[DEBUG] Checking trigger {i}: name='{trigger.get('name', 'Unnamed')}', keywords={trigger.get('keywords', [])}")
+                self.logger.debug(
+                    f"[DEBUG] Checking trigger {i}: name='{trigger.get('name', 'Unnamed')}', keywords={trigger.get('keywords', [])}"
+                )
+
+                # === トリガーごとの反応回数チェック追加 ===
+                trigger_id = trigger.get("id", f"trigger_{i}")
+                trigger_counts = user_cache.setdefault("trigger_reaction_counts", {})
+                trig_count = trigger_counts.get(trigger_id, 0)
+
+                max_reactions = trigger.get("max_reactions_per_stream", 1)
+                if trig_count >= max_reactions:
+                    self.logger.debug(
+                        f"[DEBUG] Max reactions reached for trigger {trigger_id} "
+                        f"({trig_count}/{max_reactions}), skipping response"
+                    )
+                    continue  # このトリガーはこれ以上反応しない
 
                 if self.check_trigger_match(trigger, comment):
                     self.logger.debug(f"[DEBUG] Trigger {i} matched!")
@@ -532,13 +591,17 @@ class NCVCommentServer:
                     random_roll = random.randint(1, 100)
                     self.logger.debug(f"[DEBUG] Firing probability check: {random_roll} <= {firing_prob}")
                     if random_roll <= firing_prob:
-                        response = self.generate_response_message(trigger, user_name, comment, active_broadcaster, comment_no, user_id)
+                        # カウント更新
+                        trigger_counts[trigger_id] = trig_count + 1
+
+                        response = self.generate_response_message(
+                            trigger, user_name, comment, active_broadcaster, comment_no, user_id
+                        )
                         self.logger.debug(f"[DEBUG] Generated trigger response: {response}")
                         return response
                     else:
                         self.logger.debug(f"[DEBUG] Trigger failed firing probability check")
-                else:
-                    self.logger.debug(f"[DEBUG] Trigger {i} did not match")
+
 
             # デフォルト応答チェック
             default_response = active_broadcaster.get('default_response', {})

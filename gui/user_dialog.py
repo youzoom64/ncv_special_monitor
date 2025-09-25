@@ -282,22 +282,22 @@ class UserEditDialog:
         if not messages:
             messages = [f">>{'{no}'} こんにちは、{display_name}さん"]
 
-        # 設定を作成（新形式のuser_info構造を使用）
-        user_config = {
-            "user_info": {
+        # 👇 ここで update_user を定義する
+        def update_user(config):
+            config["user_info"] = {
                 "user_id": user_id,
                 "display_name": display_name,
                 "enabled": self.user_enabled_var.get(),
                 "description": "",
                 "tags": []
-            },
-            "ai_analysis": {
+            }
+            config["ai_analysis"] = {
                 "enabled": self.analysis_enabled_var.get(),
                 "model": self.analysis_model_var.get(),
                 "custom_prompt": "",
                 "use_default_prompt": True
-            },
-            "default_response": {
+            }
+            config["default_response"] = {
                 "enabled": self.default_response_enabled_var.get(),
                 "response_type": self.response_type_var.get(),
                 "messages": messages,
@@ -305,14 +305,18 @@ class UserEditDialog:
                 "max_reactions_per_stream": int(self.max_reactions_var.get() or 1),
                 "response_delay_seconds": int(self.delay_var.get() or 0),
                 "response_split_delay_seconds": float(self.split_delay_var.get() or 1)
-            },
-            "special_triggers": self.user_config.get("special_triggers", []),
-            "broadcasters": self.user_config.get("broadcasters", {})
-        }
+            }
+            # 既存を維持
+            config["special_triggers"] = config.get("special_triggers", [])
+            config["broadcasters"] = config.get("broadcasters", {})
 
-        self.config_manager.save_user_config(user_id, user_config)
-        self.result = True
-        self.dialog.destroy()
+        # 👇 そしてこれを渡す
+        if self.config_manager._safe_save_user_config(user_id, update_user):
+            self.result = True
+            self.dialog.destroy()
+        else:
+            log_to_gui("ユーザー設定の保存に失敗しました")
+
 
     def cancel(self):
         self.dialog.destroy()

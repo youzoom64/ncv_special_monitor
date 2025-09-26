@@ -23,7 +23,7 @@ class UserEditDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("スペシャルユーザー編集" if user_id else "スペシャルユーザー追加")
-        self.dialog.geometry("1000x700")  # 幅を広げる
+        self.dialog.geometry("1000x800")  # 高さを長くする
         self.dialog.transient(parent)
         self.dialog.grab_set()
 

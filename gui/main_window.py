@@ -32,7 +32,7 @@ class NCVSpecialMonitorGUI:
         print("[DEBUG] NCVSpecialMonitorGUI.__init__() 開始")
         self.root = root
         self.root.title("NCV Special User Monitor v4")
-        self.root.geometry("1000x600")
+        self.root.geometry("1000x770")
 
         # メインアプリのインスタンスを設定
         print("[DEBUG] メインアプリのインスタンス設定")

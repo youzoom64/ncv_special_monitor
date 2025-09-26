@@ -4,6 +4,7 @@ import re
 import threading
 from datetime import datetime
 from pathlib import Path
+from gui.utils import log_to_gui
 
 class NCVFolderMonitor:
     def __init__(self, config_manager, logger, broadcast_detector):
@@ -18,6 +19,7 @@ class NCVFolderMonitor:
         """監視開始"""
         if not self.running:
             self.running = True
+            log_to_gui("ファイル監視を開始しました")
             
             # ★ 開始時に既存XMLファイルをスキャンして放送終了検出を開始
             self._initial_scan_existing_xmls()
@@ -62,6 +64,7 @@ class NCVFolderMonitor:
                             }
                             
                             self.logger.info(f"[DEBUG] 既存XML検出・監視開始: {lv_value}")
+                            log_to_gui(f"既存の放送を検出しました: {lv_value}")
                             
                             # ★ 重要：放送終了検出を開始
                             self.broadcast_detector.start_detection(xml_path, lv_value, subfolder)
@@ -73,6 +76,7 @@ class NCVFolderMonitor:
     def stop_monitoring(self):
         """監視停止"""
         self.running = False
+        log_to_gui("ファイル監視を停止しました")
         if self.thread:
             self.thread.join(timeout=10)
         self.logger.info("NCVフォルダ監視を停止しました")
@@ -138,9 +142,14 @@ class NCVFolderMonitor:
                 
                 # 既存の監視中XMLをチェック
                 self._check_monitored_xmls()
-                
-                self.logger.debug("[DEBUG] 次回スキャンまで10秒待機")
-                time.sleep(10)
+
+                # 設定からスキャン間隔を取得（分→秒に変換）
+                config = self.config_manager.load_global_config()
+                scan_interval_minutes = config.get("check_interval_minutes", 5)
+                scan_interval_seconds = scan_interval_minutes * 60
+
+                self.logger.debug(f"[DEBUG] 次回スキャンまで{scan_interval_seconds}秒待機（設定: {scan_interval_minutes}分）")
+                time.sleep(scan_interval_seconds)
                 
             except Exception as e:
                 self.logger.error(f"監視ループエラー: {str(e)}")
@@ -162,6 +171,7 @@ class NCVFolderMonitor:
             }
             
             self.logger.info(f"新規XML検出・監視開始: {lv_value} ({subfolder_name})")
+            log_to_gui(f"新規放送を検出しました: {lv_value}")
             
             self.broadcast_detector.start_detection(xml_path, lv_value, subfolder_name)
             

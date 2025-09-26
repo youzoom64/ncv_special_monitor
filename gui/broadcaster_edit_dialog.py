@@ -195,22 +195,16 @@ class BroadcasterEditDialog:
                 "messages": messages,
                 "ai_response_prompt": self.ai_prompt_var.get(),
                 "max_reactions_per_stream": int(self.max_reactions_var.get() or 1),
-                "response_delay_seconds": int(float(self.delay_var.get() or 0)),
-                "response_split_delay_seconds": int(float(self.split_delay_var.get() or 1))
+                "response_delay_seconds": int(self.delay_var.get() or 0),
+                "response_split_delay_seconds": int(self.split_delay_var.get() or 1)
             },
             "triggers": current_triggers  # 最新のトリガー情報を使用
         }
         print(f"[GUI DEBUG] Saving broadcaster config with {len(current_triggers)} triggers")
 
-        try:
-            self.config_manager.save_broadcaster_config(self.user_id, broadcaster_id, broadcaster_config)
-            print(f"[GUI DEBUG] Save completed successfully")
-            self.result = True
-            self.dialog.destroy()
-        except Exception as e:
-            print(f"[GUI ERROR] Save failed: {e}")
-            import traceback
-            traceback.print_exc()
+        self.config_manager.save_broadcaster_config(self.user_id, broadcaster_id, broadcaster_config)
+        self.result = True
+        self.dialog.destroy()
 
     def cancel(self):
         self.dialog.destroy()

@@ -14,6 +14,7 @@ import re
 # config_manager を import
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from config_manager import HierarchicalConfigManager
+from gui.utils import log_to_gui
 
 class NCVCommentServer:
     def __init__(self):
@@ -746,6 +747,7 @@ class NCVCommentServer:
         """AI応答を生成"""
         try:
             print(f"[DEBUG] AI応答生成: プロンプト='{prompt_template}'")
+            log_to_gui("AIに応答を生成中...")
 
             # グローバル設定を取得
             global_config = self.config_manager.load_global_config()
@@ -813,6 +815,7 @@ class NCVCommentServer:
                 # 改行を削除して一行にまとめる
                 single_line_response = ' '.join(line.strip() for line in response.split('\n') if line.strip())
                 print(f"[DEBUG] AI応答({len(single_line_response)}文字): {single_line_response}")
+                log_to_gui(f"AI応答を生成しました: {single_line_response[:30]}{'...' if len(single_line_response) > 30 else ''}")
 
                 if single_line_response:
                     return single_line_response
@@ -891,8 +894,10 @@ class NCVCommentServer:
                 success, message = await self.send_comment_to_specific_client(instance_id, response_message)
                 if success:
                     print(f"[DEBUG] ✓ 送信成功")
+                    log_to_gui(f"コメントを送信しました: {response_message}")
                 else:
                     print(f"[DEBUG] ✗ 送信失敗: {message}")
+                    log_to_gui(f"コメント送信が失敗しました: {message}")
                 return
 
             # 70文字を超える場合は分割して送信
@@ -937,6 +942,7 @@ class NCVCommentServer:
                     await asyncio.sleep(split_delay)
 
             print(f"[DEBUG] 分割送信完了({len(parts)}パート)")
+            log_to_gui(f"分割コメントを送信完了しました ({len(parts)}パート)")
 
         except Exception as e:
             self.logger.error(f"Error sending response to NCV plugin: {str(e)}")

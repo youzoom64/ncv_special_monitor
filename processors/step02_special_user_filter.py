@@ -1,6 +1,10 @@
 import concurrent.futures
 from datetime import datetime
 import re
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from gui.utils import log_to_gui
 
 def process(pipeline_data):
     """Step02: スペシャルユーザー検索 + AI分析"""
@@ -10,6 +14,7 @@ def process(pipeline_data):
         comments_data = pipeline_data['results']['step01_xml_parser']['comments_data']
         
         print(f"Step02 開始: スペシャルユーザー検索 + AI分析 - {lv_value}")
+        log_to_gui(f"スペシャルユーザーの分析を開始しました: {lv_value}")
         
         # スペシャルユーザーリストを取得
         special_users = get_special_users_from_config(config)
@@ -95,9 +100,11 @@ def perform_ai_analysis_parallel(found_users_data, config):
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # 各ユーザーのAI分析を並列実行
         future_to_user = {
-            executor.submit(analyze_single_user, user_data, config): user_data 
+            executor.submit(analyze_single_user, user_data, config): user_data
             for user_data in found_users_data
         }
+
+        log_to_gui(f"{len(found_users_data)}人のスペシャルユーザーをAI分析中...")
         
         for future in concurrent.futures.as_completed(future_to_user):
             user_data = future_to_user[future]
@@ -108,6 +115,7 @@ def perform_ai_analysis_parallel(found_users_data, config):
                 user_data['ai_prompt_used'] = analysis_data['prompt_used']  # ★ 追加
                 analyzed_users.append(user_data)
                 print(f"AI分析完了: {user_data['user_id']} (モデル: {analysis_data['model_used']})")
+                log_to_gui(f"ユーザー {user_data.get('user_name', user_data['user_id'])} のAI分析が完了しました")
             except Exception as e:
                 print(f"AI分析エラー: {user_data['user_id']} - {str(e)}")
                 # エラー時は基本分析で継続
@@ -181,6 +189,7 @@ def analyze_single_user(user_data, config):
         }
 
     # AI分析実行
+    log_to_gui(f"ユーザー {user_name} のAI分析を実行中...")
     try:
         if ai_model == "openai-gpt4o":
             analysis_result, used_prompt = generate_openai_analysis_with_prompt(

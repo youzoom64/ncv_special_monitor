@@ -93,7 +93,12 @@ class BroadcasterEditDialog:
 
         ttk.Label(response_frame, text="AIプロンプト:").pack(anchor=tk.W)
         self.ai_prompt_var = tk.StringVar(value=self.broadcaster_config.get("default_response", {}).get("ai_response_prompt", ""))
-        ttk.Entry(response_frame, textvariable=self.ai_prompt_var).pack(fill=tk.X, pady=(0, 5))
+        ttk.Entry(response_frame, textvariable=self.ai_prompt_var).pack(fill=tk.X, pady=2)
+
+        # AIプロンプト変数説明
+        prompt_help_text = "使用可能な変数: {no}, {user_name}, {display_name}, {user_id}, {comment_content}, {time}, {date}, {datetime}, {broadcaster_name}"
+        help_label = ttk.Label(response_frame, text=prompt_help_text, font=("", 8), foreground="gray")
+        help_label.pack(anchor=tk.W, pady=(2, 5))
 
         # 反応設定
         reaction_frame = ttk.Frame(response_frame)

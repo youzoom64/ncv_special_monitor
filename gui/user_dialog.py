@@ -140,6 +140,11 @@ class UserEditDialog:
         self.ai_prompt_var = tk.StringVar(value=self.user_config.get("default_response", {}).get("ai_response_prompt", ""))
         ttk.Entry(response_frame, textvariable=self.ai_prompt_var).pack(fill=tk.X, pady=2)
 
+        # AIプロンプト変数説明
+        prompt_help_text = "使用可能な変数: {no}, {user_name}, {display_name}, {user_id}, {comment_content}, {trigger_content}, {time}, {date}, {datetime}"
+        help_label = ttk.Label(response_frame, text=prompt_help_text, font=("", 8), foreground="gray")
+        help_label.pack(anchor=tk.W, pady=(2, 5))
+
         # 反応設定
         reaction_frame = ttk.Frame(response_frame)
         reaction_frame.pack(fill=tk.X, pady=(5, 0))

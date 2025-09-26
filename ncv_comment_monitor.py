@@ -240,6 +240,26 @@ class NCVCommentServer:
             'live_id': live_id
         }))
 
+        await self.broadcast_comment_to_all_clients(data)
+
+    async def broadcast_comment_to_all_clients(self, comment_data):
+        """全クライアントにコメントデータをブロードキャスト"""
+        message = json.dumps(comment_data)
+        
+        # 切断されたクライアントを記録
+        dead_clients = []
+        
+        for client_id, client_info in self.clients.items():
+            try:
+                await client_info['websocket'].send(message)
+            except:
+                dead_clients.append(client_id)
+        
+        # 切断されたクライアントを削除
+        for client_id in dead_clients:
+            if client_id in self.clients:
+                del self.clients[client_id]
+
     async def handle_list_clients_request(self, websocket):
         """クライアント一覧要求の処理"""
         try:

@@ -169,6 +169,7 @@ class NCVCommentServer:
         user_id = data.get('user_id', '')
         user_name = data.get('user_name', '')
         live_id = data.get('live_id', '')
+        live_title = data.get('live_title', '')
         instance_id = data.get('instance_id', '')
         comment_no = int(data.get('no', 1))  # コメント番号を取得（NCVPluginでは'no'フィールド）
 
@@ -472,7 +473,7 @@ class NCVCommentServer:
                 'message': 'All user configurations reloaded'
             }))
 
-    async def process_special_user_comment(self, user_id: str, user_name: str, comment: str, live_id: str, instance_id: str, comment_no: int = 1) -> str:
+    async def process_special_user_comment(self, user_id: str, user_name: str, comment: str, live_id: str, instance_id: str, comment_no: int = 1, live_title: str = None) -> str:
         """スペシャルユーザーのコメントを処理して応答メッセージを生成"""
         try:
             print(f"[DEBUG] コメント処理: {user_name}({user_id}) → '{comment}'")
@@ -500,6 +501,20 @@ class NCVCommentServer:
             # カウント更新
             user_cache["reaction_count"] = reaction_count + 1
 
+            # 配信者設定を取得（簡略化：最初の有効な配信者を使用）
+            broadcasters = user_config.get('broadcasters', {})
+            self.logger.debug(f"[DEBUG] Broadcasters found: {list(broadcasters.keys())}")
+
+            active_broadcaster = None
+            active_broadcaster_id = None
+
+            for broadcaster_id, broadcaster_config in broadcasters.items():
+                self.logger.debug(f"[DEBUG] Checking broadcaster {broadcaster_id}, enabled: {broadcaster_config.get('enabled', True)}")
+                if broadcaster_config.get('enabled', True):
+                    active_broadcaster = broadcaster_config
+                    active_broadcaster_id = broadcaster_id
+                    self.logger.debug(f"[DEBUG] Selected active broadcaster: {broadcaster_id}")
+                    break
 
             # === 配信者ごとの最大反応数チェック追加 ===
             if active_broadcaster_id:
@@ -521,8 +536,6 @@ class NCVCommentServer:
                 # カウント更新
                 br_counts[active_broadcaster_id] = br_count + 1
 
-
-
             # 最上位階層チェック: スペシャルユーザー自体が無効なら全て無効
             user_info_enabled = user_config.get('user_info', {}).get('enabled', True)
             overall_user_enabled = user_config.get('enabled', True)  # 直接形式もチェック
@@ -532,21 +545,6 @@ class NCVCommentServer:
             if not user_enabled:
                 self.logger.debug(f"[DEBUG] User {user_id} is disabled at top level, skipping all processing")
                 return None
-
-            # 配信者設定を取得（簡略化：最初の有効な配信者を使用）
-            broadcasters = user_config.get('broadcasters', {})
-            self.logger.debug(f"[DEBUG] Broadcasters found: {list(broadcasters.keys())}")
-
-            active_broadcaster = None
-            active_broadcaster_id = None
-
-            for broadcaster_id, broadcaster_config in broadcasters.items():
-                self.logger.debug(f"[DEBUG] Checking broadcaster {broadcaster_id}, enabled: {broadcaster_config.get('enabled', True)}")
-                if broadcaster_config.get('enabled', True):
-                    active_broadcaster = broadcaster_config
-                    active_broadcaster_id = broadcaster_id
-                    self.logger.debug(f"[DEBUG] Selected active broadcaster: {broadcaster_id}")
-                    break
 
             if not active_broadcaster:
                 self.logger.debug(f"[DEBUG] No active broadcaster found, checking user default response")
@@ -695,8 +693,6 @@ class NCVCommentServer:
                     message = message.replace('{{no}}', str(comment_no))  # コメント番号
                     message = message.replace('{{user_name}}', user_name)  # ユーザー名
                     message = message.replace('{user_name}', user_name)  # {user_name} 形式
-                    message = message.replace('{{display_name}}', user_name)  # ユーザー表示名
-                    message = message.replace('{display_name}', user_name)  # {display_name} 形式
                     message = message.replace('{{user_id}}', user_id)  # ユーザーID
                     message = message.replace('{user_id}', user_id)  # {user_id} 形式
                     message = message.replace('{{comment_content}}', comment)  # コメント内容
@@ -724,7 +720,7 @@ class NCVCommentServer:
                 self.logger.debug(f"[DEBUG] Using AI response")
                 ai_prompt = response_config.get('ai_response_prompt', '')
                 if ai_prompt:
-                    ai_response = self.generate_ai_response(ai_prompt, user_name, comment, user_id, broadcaster_config, comment_no, trigger_content=comment)
+                    ai_response = self.generate_ai_response(ai_prompt, user_name, comment, user_id, broadcaster_config, comment_no, trigger_content=comment, lv_title=live_title)
                     if ai_response:
                         return ai_response
                     else:
@@ -743,7 +739,7 @@ class NCVCommentServer:
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    def generate_ai_response(self, prompt_template: str, user_name: str, comment: str, user_id: str, broadcaster_config: dict = None, comment_no: int = 1, trigger_content: str = None) -> str:
+    def generate_ai_response(self, prompt_template: str, user_name: str, comment: str, user_id: str, broadcaster_config: dict = None, comment_no: int = 1, trigger_content: str = None, lv_title: str = None) -> str:
         """AI応答を生成"""
         try:
             print(f"[DEBUG] AI応答生成: プロンプト='{prompt_template}'")
@@ -776,8 +772,6 @@ class NCVCommentServer:
             prompt = prompt.replace('{no}', str(comment_no))
             prompt = prompt.replace('{{user_name}}', user_name)
             prompt = prompt.replace('{user_name}', user_name)
-            prompt = prompt.replace('{{display_name}}', user_name)
-            prompt = prompt.replace('{display_name}', user_name)
             prompt = prompt.replace('{{user_id}}', user_id)
             prompt = prompt.replace('{user_id}', user_id)
             prompt = prompt.replace('{{comment_content}}', comment)
@@ -793,6 +787,11 @@ class NCVCommentServer:
             prompt = prompt.replace('{date}', current_date)
             prompt = prompt.replace('{{datetime}}', current_datetime)
             prompt = prompt.replace('{datetime}', current_datetime)
+
+            # lv_title変数の置換
+            if lv_title:
+                prompt = prompt.replace('{{lv_title}}', lv_title)
+                prompt = prompt.replace('{lv_title}', lv_title)
 
             if broadcaster_config:
                 broadcaster_name = broadcaster_config.get('broadcaster_name', 'Unknown')

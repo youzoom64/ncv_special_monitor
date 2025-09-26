@@ -96,7 +96,7 @@ class BroadcasterEditDialog:
         ttk.Entry(response_frame, textvariable=self.ai_prompt_var).pack(fill=tk.X, pady=2)
 
         # AIプロンプト変数説明
-        prompt_help_text = "使用可能な変数: {no}, {user_name}, {display_name}, {user_id}, {comment_content}, {time}, {date}, {datetime}, {broadcaster_name}"
+        prompt_help_text = "使用可能な変数: {no}, {user_name}, {user_id}, {comment_content}, {time}, {date}, {datetime}, {broadcaster_name}"
         help_label = ttk.Label(response_frame, text=prompt_help_text, font=("", 8), foreground="gray")
         help_label.pack(anchor=tk.W, pady=(2, 5))
 

@@ -102,7 +102,7 @@ class UserEditDialog:
 
         # 変数説明
         variables_help = ttk.Label(ai_frame,
-            text="使用可能な変数: {user} (ユーザー名), {lv_title} (配信タイトル)",
+            text="使用可能な変数: {user_name}, {user_id}, {lv_title}, {time}, {date}, {datetime}",
             font=("TkDefaultFont", 8))
         variables_help.pack(anchor=tk.W, pady=(2,0))
 
@@ -141,7 +141,7 @@ class UserEditDialog:
         ttk.Entry(response_frame, textvariable=self.ai_prompt_var).pack(fill=tk.X, pady=2)
 
         # AIプロンプト変数説明
-        prompt_help_text = "使用可能な変数: {no}, {user_name}, {display_name}, {user_id}, {comment_content}, {trigger_content}, {time}, {date}, {datetime}"
+        prompt_help_text = "使用可能な変数: {no}, {user_name}, {user_id}, {comment_content}, {trigger_content}, {time}, {date}, {datetime}"
         help_label = ttk.Label(response_frame, text=prompt_help_text, font=("", 8), foreground="gray")
         help_label.pack(anchor=tk.W, pady=(2, 5))
 
@@ -350,11 +350,21 @@ class UserEditDialog:
             config["broadcasters"] = config.get("broadcasters", {})
 
         # 👇 そしてこれを渡す
-        if self.config_manager._safe_save_user_config(user_id, update_user):
-            self.result = True
-            self.dialog.destroy()
-        else:
-            log_to_gui("ユーザー設定の保存に失敗しました")
+        print(f"[DEBUG] 保存開始: user_id={user_id}")
+        try:
+            if self.config_manager._safe_save_user_config(user_id, update_user):
+                print(f"[DEBUG] 保存成功")
+                log_to_gui(f"ユーザー '{display_name}' の設定を保存しました")
+                self.result = True
+                self.dialog.destroy()
+            else:
+                print(f"[DEBUG] 保存失敗")
+                log_to_gui("ユーザー設定の保存に失敗しました")
+        except Exception as e:
+            print(f"[DEBUG] 保存エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            log_to_gui(f"保存エラー: {str(e)}")
 
 
     def on_prompt_mode_change(self):

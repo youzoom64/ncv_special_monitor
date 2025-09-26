@@ -33,21 +33,7 @@ class BroadcastEndDetector:
             'thread': None
         }
 
-        # --- 初回即時チェック ---
-        try:
-            self.logger.debug(f"[DEBUG] 初回即時チェック開始: {lv_value}")  # ★ 追加
-            if self._check_broadcast_end(lv_value):
-                self.logger.info(f"放送終了を即時検出: {lv_value}")
-                # パイプライン実行 & 処理済み登録
-                self.pipeline_executor.execute_pipeline(xml_path, lv_value, subfolder_name)
-                self.config_manager.add_processed_xml(xml_path)
-                return  # スレッド起動せず終了
-            else:
-                self.logger.debug(f"[DEBUG] 初回チェック結果: 放送継続中 {lv_value}")  # ★ 追加
-        except Exception as e:
-            self.logger.error(f"初回終了チェックでエラー: {lv_value} - {str(e)}")
-
-        # --- 継続監視スレッド開始 ---
+        # --- バックグラウンドスレッドですぐに検出開始 ---
         thread = threading.Thread(
             target=self._detection_loop,
             args=(detection_info,),
@@ -55,9 +41,9 @@ class BroadcastEndDetector:
         )
         detection_info['thread'] = thread
         self.active_detections[lv_value] = detection_info
-        
+
         thread.start()
-        self.logger.info(f"放送終了検出開始: {lv_value}")
+        self.logger.info(f"放送終了検出開始（バックグラウンド）: {lv_value}")
     
     def _detection_loop(self, detection_info):
         lv_value = detection_info['lv_value']
@@ -68,12 +54,21 @@ class BroadcastEndDetector:
         check_interval = 30  # ★ 10秒 → 30秒に変更
         max_retries = config.get("retry_count", 3)
 
-        # ★ 最初に少し待機（同時アクセス回避）
-        import random
-        initial_delay = random.uniform(1, 10)  # 1-10秒のランダム待機
-        time.sleep(initial_delay)
-        
         try:
+            # ★ 最初に即時チェック
+            self.logger.debug(f"[DEBUG] 初回バックグラウンドチェック開始: {lv_value}")
+            if self._check_broadcast_end(lv_value):
+                self.logger.info(f"放送終了を即時検出: {lv_value}")
+                self.pipeline_executor.execute_pipeline(xml_path, lv_value, subfolder_name)
+                self.config_manager.add_processed_xml(xml_path)
+                del self.active_detections[lv_value]
+                return
+
+            # ★ 最初に少し待機（同時アクセス回避）
+            import random
+            initial_delay = random.uniform(1, 10)  # 1-10秒のランダム待機
+            time.sleep(initial_delay)
+
             while lv_value in self.active_detections:
                 try:
                     self.logger.debug(f"[DEBUG] 放送終了チェック開始: {lv_value}")

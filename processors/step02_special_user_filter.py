@@ -312,9 +312,20 @@ def build_analysis_prompt(user_data, config, prompt_template: str) -> str:
     # 変数置換（失敗しても素通し）
     analysis_prompt = prompt_template or ""
     try:
+        from datetime import datetime
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        current_date = now.strftime("%Y-%m-%d")
+        current_datetime = now.strftime("%Y-%m-%d %H:%M:%S")
+
         analysis_prompt = analysis_prompt.format(
             user=user_data.get('user_name') or f"ユーザー{user_data.get('user_id','')}",
-            lv_title=live_title
+            user_name=user_data.get('user_name') or f"ユーザー{user_data.get('user_id','')}",
+            user_id=user_data.get('user_id', ''),
+            lv_title=live_title,
+            time=current_time,
+            date=current_date,
+            datetime=current_datetime
         )
     except Exception as e:
         print(f"プロンプト変数置換エラー: {e}")
@@ -404,9 +415,20 @@ def generate_openai_analysis(user_data, config):
         
         # ★★★ 重要：変数置換を実行 ★★★
         try:
+            from datetime import datetime
+            now = datetime.now()
+            current_time = now.strftime("%H:%M:%S")
+            current_date = now.strftime("%Y-%m-%d")
+            current_datetime = now.strftime("%Y-%m-%d %H:%M:%S")
+
             analysis_prompt = analysis_prompt.format(
                 user=user_data['user_name'],
-                lv_title=live_title
+                user_name=user_data['user_name'],
+                user_id=user_data['user_id'],
+                lv_title=live_title,
+                time=current_time,
+                date=current_date,
+                datetime=current_datetime
             )
         except KeyError as e:
             print(f"プロンプト変数置換エラー: {e}")
@@ -500,9 +522,20 @@ def generate_gemini_analysis(user_data, config):
         
         # ★★★ 重要：変数置換を実行 ★★★
         try:
+            from datetime import datetime
+            now = datetime.now()
+            current_time = now.strftime("%H:%M:%S")
+            current_date = now.strftime("%Y-%m-%d")
+            current_datetime = now.strftime("%Y-%m-%d %H:%M:%S")
+
             analysis_prompt = analysis_prompt.format(
                 user=user_data['user_name'],
-                lv_title=live_title
+                user_name=user_data['user_name'],
+                user_id=user_data['user_id'],
+                lv_title=live_title,
+                time=current_time,
+                date=current_date,
+                datetime=current_datetime
             )
         except KeyError as e:
             print(f"プロンプト変数置換エラー: {e}")

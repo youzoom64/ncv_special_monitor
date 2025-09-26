@@ -48,9 +48,13 @@ def process(pipeline_data):
 
 def get_special_users_from_config(config):
     """個別設定から全スペシャルユーザーを取得"""
-    from config_manager import IndividualConfigManager
-    config_manager = IndividualConfigManager()
-    return config_manager.get_special_users_list()
+    from config_manager import HierarchicalConfigManager
+    
+    config_manager = HierarchicalConfigManager()
+    special_users = config_manager.get_all_special_users()
+    
+    print(f"[DEBUG] SpecialUserディレクトリから{len(special_users)}人検出")
+    return special_users
 
 def find_special_users_in_comments(comments_data, special_users):
     """コメントからスペシャルユーザーを検索"""
@@ -116,8 +120,8 @@ def perform_ai_analysis_parallel(found_users_data, config):
 
 # === 置換: analyze_single_user（個別設定優先） ===
 def analyze_single_user(user_data, config):
-    """個別設定（IndividualConfigManager）を優先してAI分析を実行"""
-    from config_manager import IndividualConfigManager
+    """個別設定（SpecialUser/ユーザーID_表示名/config.json）を優先してAI分析を実行"""
+    from config_manager import HierarchicalConfigManager
 
     user_id = user_data['user_id']
     user_name = user_data.get('user_name', '')
@@ -130,35 +134,44 @@ def analyze_single_user(user_data, config):
             'prompt_used': ''
         }
 
-    cfg = IndividualConfigManager()
-    user_cfg = cfg.load_user_config(user_id, user_name) or {}
-    global_cfg = cfg.load_global_config() or {}
+    # ★ HierarchicalConfigManagerを使用
+    config_manager = HierarchicalConfigManager()
+    
+    # ユーザー設定を取得（SpecialUser/ユーザーID_表示名/config.jsonから）
+    user_config = config_manager.get_user_config(user_id)
+    
+    print(f"[DEBUG] 設定読み込み: {user_id}_{user_name}")
+    print(f"[DEBUG] 設定パス: SpecialUser/{user_id}_{user_name}/config.json")
+    print(f"[DEBUG] 設定内容: {list(user_config.keys())}")
 
-    ai_settings = user_cfg.get("ai_analysis", {}) or {}
+    # AI設定を取得
+    ai_analysis_config = user_config.get("ai_analysis", {})
 
-    # 有効・モデル決定（個別 > グローバル > 旧config > デフォルト）
-    analysis_enabled = ai_settings.get("enabled", True)
+    # 有効・モデル決定
+    analysis_enabled = ai_analysis_config.get("enabled", True)
+    
+    # グローバル設定からデフォルト値を取得
+    global_config = config_manager.load_global_config()
+    ai_settings = global_config.get("api_settings", {})
+    
     ai_model = (
-        ai_settings.get("model")
-        or ai_settings.get("analysis_ai_model")
-        or global_cfg.get("default_analysis_model")
-        or config.get("special_users_config", {}).get("default_analysis_ai_model")
+        ai_analysis_config.get("model")
+        or ai_settings.get("summary_ai_model")
         or "openai-gpt4o"
     )
 
-    # プロンプト決定（個別 > グローバル > 旧config）
-    if ai_settings.get("use_default_prompt", True):
-        prompt_template = (
-            global_cfg.get("default_analysis_prompt")
-            or config.get("special_users_config", {}).get("default_analysis_prompt", "")
-        )
+    # プロンプト決定
+    if ai_analysis_config.get("use_default_prompt", True):
+        # デフォルトプロンプトを使用
+        prompt_template = ai_settings.get("default_analysis_prompt", "")
     else:
-        prompt_template = ai_settings.get("custom_prompt", "") or ""
+        # カスタムプロンプトを使用
+        prompt_template = ai_analysis_config.get("custom_prompt", "")
 
     # 変数注入込みの最終プロンプトを構築
     full_prompt = build_analysis_prompt(user_data, config, prompt_template)
 
-    print(f"AI分析設定 - モデル: {ai_model}, 有効: {analysis_enabled}")
+    print(f"[DEBUG] AI分析設定 - モデル: {ai_model}, 有効: {analysis_enabled}")
 
     if not analysis_enabled:
         return {
@@ -167,6 +180,7 @@ def analyze_single_user(user_data, config):
             'prompt_used': 'basic_analysis'
         }
 
+    # AI分析実行
     try:
         if ai_model == "openai-gpt4o":
             analysis_result, used_prompt = generate_openai_analysis_with_prompt(

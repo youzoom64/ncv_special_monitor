@@ -75,6 +75,52 @@ class UserEditDialog:
         self.analysis_model_var = tk.StringVar(value=self.user_config.get("ai_analysis", {}).get("model", "openai-gpt4o"))
         ttk.Combobox(ai_frame, textvariable=self.analysis_model_var, values=["openai-gpt4o", "google-gemini-2.5-flash"]).pack(fill=tk.X, pady=2)
 
+        # ★★★ プロンプト設定を追加 ★★★
+        ttk.Label(ai_frame, text="プロンプト設定:").pack(anchor=tk.W, pady=(10,0))
+        
+        self.use_default_prompt_var = tk.BooleanVar(value=self.user_config.get("ai_analysis", {}).get("use_default_prompt", True))
+        default_prompt_cb = ttk.Checkbutton(ai_frame, text="デフォルトプロンプトを使用", variable=self.use_default_prompt_var, command=self.on_prompt_mode_change)
+        default_prompt_cb.pack(anchor=tk.W)
+
+        # カスタムプロンプト入力エリア
+        custom_prompt_frame = ttk.Frame(ai_frame)
+        custom_prompt_frame.pack(fill=tk.X, pady=(5,0))
+        
+        ttk.Label(custom_prompt_frame, text="カスタムプロンプト:").pack(anchor=tk.W)
+        
+        # テキストエリアとスクロールバー
+        prompt_text_frame = ttk.Frame(custom_prompt_frame)
+        prompt_text_frame.pack(fill=tk.X, pady=2)
+        
+        self.custom_prompt_text = tk.Text(prompt_text_frame, height=4, wrap=tk.WORD)
+        prompt_scrollbar = ttk.Scrollbar(prompt_text_frame, orient="vertical", command=self.custom_prompt_text.yview)
+        self.custom_prompt_text.configure(yscrollcommand=prompt_scrollbar.set)
+        
+        self.custom_prompt_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        prompt_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # カスタムプロンプト内容を設定
+        custom_prompt = self.user_config.get("ai_analysis", {}).get("custom_prompt", "")
+        if custom_prompt:
+            self.custom_prompt_text.insert("1.0", custom_prompt)
+        
+        # 変数説明ラベル
+        variables_help = ttk.Label(custom_prompt_frame, 
+            text="使用可能な変数: {user} (ユーザー名), {lv_title} (配信タイトル)", 
+            font=("TkDefaultFont", 8))
+        variables_help.pack(anchor=tk.W, pady=(2,0))
+        
+        # プロンプトテンプレートボタン
+        template_frame = ttk.Frame(custom_prompt_frame)
+        template_frame.pack(fill=tk.X, pady=(5,0))
+        
+        ttk.Button(template_frame, text="基本テンプレート", command=self.insert_basic_template).pack(side=tk.LEFT, padx=(0,5))
+        ttk.Button(template_frame, text="詳細分析テンプレート", command=self.insert_detailed_template).pack(side=tk.LEFT, padx=(0,5))
+        ttk.Button(template_frame, text="リセット", command=self.clear_custom_prompt).pack(side=tk.LEFT)
+        
+        # 初期状態でプロンプトエリアの有効/無効を設定
+        self.on_prompt_mode_change()
+
         # デフォルト応答設定
         response_frame = ttk.LabelFrame(left_frame, text="デフォルト応答設定", padding="5")
         response_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -282,7 +328,9 @@ class UserEditDialog:
         if not messages:
             messages = [f">>{'{no}'} こんにちは、{display_name}さん"]
 
-        # 👇 ここで update_user を定義する
+        # ★★★ カスタムプロンプトを取得 ★★★
+        custom_prompt = self.custom_prompt_text.get("1.0", tk.END).strip()
+
         def update_user(config):
             config["user_info"] = {
                 "user_id": user_id,
@@ -294,8 +342,8 @@ class UserEditDialog:
             config["ai_analysis"] = {
                 "enabled": self.analysis_enabled_var.get(),
                 "model": self.analysis_model_var.get(),
-                "custom_prompt": "",
-                "use_default_prompt": True
+                "use_default_prompt": self.use_default_prompt_var.get(),  # ★ 追加
+                "custom_prompt": custom_prompt                            # ★ 追加
             }
             config["default_response"] = {
                 "enabled": self.default_response_enabled_var.get(),
@@ -310,10 +358,10 @@ class UserEditDialog:
             config["special_triggers"] = config.get("special_triggers", [])
             config["broadcasters"] = config.get("broadcasters", {})
 
-        # 👇 そしてこれを渡す
         if self.config_manager._safe_save_user_config(user_id, update_user):
             self.result = True
             self.dialog.destroy()
+            log_to_gui(f"ユーザー '{display_name}' の設定を保存しました")
         else:
             log_to_gui("ユーザー設定の保存に失敗しました")
 
@@ -434,3 +482,71 @@ class UserEditDialog:
             log_to_gui(f"すべての配信者を{action}にしました")
         else:
             log_to_gui("配信者設定の更新に失敗しました")
+
+
+    def on_prompt_mode_change(self):
+        """プロンプトモード変更時の処理"""
+        use_default = self.use_default_prompt_var.get()
+        
+        # カスタムプロンプトエリアの有効/無効を切り替え
+        state = tk.DISABLED if use_default else tk.NORMAL
+        self.custom_prompt_text.config(state=state)
+        
+        if use_default:
+            # デフォルトプロンプトを使用する場合は背景色を変更
+            self.custom_prompt_text.config(bg="#f0f0f0")
+        else:
+            # カスタムプロンプトを使用する場合は通常の背景色
+            self.custom_prompt_text.config(bg="white")
+
+    def insert_basic_template(self):
+        """基本テンプレートを挿入"""
+        template = """「{user}」さんの「{lv_title}」でのコメント行動を分析してください。
+
+    以下の観点から詳しく分析をお願いします：
+    - コメントの頻度と投稿パターン
+    - 配信への参加度や貢献度
+    - コメント内容の特徴や傾向
+    - 他の視聴者との交流の様子
+
+    分析結果はHTML形式で出力し、読みやすく整理してください。"""
+        
+        self.custom_prompt_text.delete("1.0", tk.END)
+        self.custom_prompt_text.insert("1.0", template)
+
+    def insert_detailed_template(self):
+        """詳細分析テンプレートを挿入"""
+        template = """配信視聴者「{user}」の行動分析レポート
+    対象配信：「{lv_title}」
+
+    【分析項目】
+    1. 基本統計
+    - 総コメント数と投稿時間分布
+    - 平均コメント長と文字数傾向
+
+    2. 参加パターン分析
+    - 配信参加のタイミング（開始直後、中盤、終盤など）
+    - コメント投稿の時間間隔と集中度
+
+    3. コミュニケーション分析
+    - 配信者への直接的な反応やコメント
+    - 他視聴者との交流の有無と内容
+
+    4. 内容分析
+    - 感情表現の傾向（ポジティブ/ネガティブ）
+    - 話題への反応パターン
+    - 独自性のあるコメントや印象的な発言
+
+    5. 総合評価
+    - このユーザーの配信における位置づけ
+    - コミュニティへの貢献度
+    - 今後の関係性に関する提案
+
+    分析結果はHTML形式で、各項目を<h3>タグで整理し、<br>タグで改行して出力してください。"""
+        
+        self.custom_prompt_text.delete("1.0", tk.END)
+        self.custom_prompt_text.insert("1.0", template)
+
+    def clear_custom_prompt(self):
+        """カスタムプロンプトをクリア"""
+        self.custom_prompt_text.delete("1.0", tk.END)

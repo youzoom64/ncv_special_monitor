@@ -109,13 +109,13 @@ class UserEditDialog:
         # 初期状態設定
         self.on_prompt_mode_change()
 
-        # デフォルト応答設定
-        response_frame = ttk.LabelFrame(left_frame, text="デフォルト応答設定", padding="5")
+        # 定型メッセージ応答設定
+        response_frame = ttk.LabelFrame(left_frame, text="定型メッセージ応答設定", padding="5")
         response_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        # デフォルト応答有効チェックボックス
+        # 定型メッセージ有効チェックボックス
         self.default_response_enabled_var = tk.BooleanVar(value=self.user_config.get("default_response", {}).get("enabled", True))
-        ttk.Checkbutton(response_frame, text="デフォルト応答を有効化", variable=self.default_response_enabled_var).pack(anchor=tk.W, pady=(0, 5))
+        ttk.Checkbutton(response_frame, text="定型メッセージを有効化", variable=self.default_response_enabled_var).pack(anchor=tk.W, pady=(0, 5))
 
         # 応答タイプ
         type_frame = ttk.Frame(response_frame)

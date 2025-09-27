@@ -10,6 +10,7 @@ class DatabaseManager:
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.init_database()
+        self.add_missing_columns()  # ★分離
     
     def init_database(self):
         """データベースとテーブルを初期化"""
@@ -126,6 +127,22 @@ class DatabaseManager:
             ''')
         print(f"データベース初期化完了: {self.db_path}")
 
+    def add_missing_columns(self):
+        """既存テーブルに不足カラムを追加"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("PRAGMA table_info(comments)")
+            existing_columns = [row[1] for row in cursor.fetchall()]
+            
+            if 'broadcast_title' not in existing_columns:
+                cursor.execute('ALTER TABLE comments ADD COLUMN broadcast_title TEXT')
+            if 'broadcast_start_time' not in existing_columns:
+                cursor.execute('ALTER TABLE comments ADD COLUMN broadcast_start_time TEXT')
+            if 'broadcast_lv_id' not in existing_columns:
+                cursor.execute('ALTER TABLE comments ADD COLUMN broadcast_lv_id TEXT')
+
+
 def process(pipeline_data):
     """Step04: データベース保存"""
     try:
@@ -152,8 +169,8 @@ def process(pipeline_data):
         # 2. スペシャルユーザー設定を保存/更新
         save_special_users_config(db_manager, config)
         
-        # 3. 全コメントを保存（コンテキスト用）
-        comments_saved = save_all_comments(db_manager, broadcast_id, all_comments, special_users_found)
+        # 3. 全コメントを保存（コンテキスト用） ★broadcast_info追加
+        comments_saved = save_all_comments(db_manager, broadcast_id, all_comments, special_users_found, broadcast_info)
         
         # 4. AI分析結果を保存
         analyses_saved = save_ai_analyses(db_manager, broadcast_id, special_users_found)
@@ -331,7 +348,8 @@ def save_special_users_config(db_manager: DatabaseManager, config: Dict):
                 print(f"新規スペシャルユーザー登録: {user_id} ({current_name})")
 
 def save_all_comments(db_manager: DatabaseManager, broadcast_id: int, 
-                     all_comments: List[Dict], special_users_found: List[Dict]) -> int:
+                     all_comments: List[Dict], special_users_found: List[Dict], 
+                     broadcast_info: Dict) -> int:  # ★broadcast_info引数追加
     """全コメントを保存（コンテキスト用）"""
     special_user_ids = {user['user_id'] for user in special_users_found}
     
@@ -347,6 +365,16 @@ def save_all_comments(db_manager: DatabaseManager, broadcast_id: int,
         
         # 配信開始時刻を取得（経過時間計算用）
         start_timestamp = all_comments[0].get('date', 0) if all_comments else 0
+        
+        # ★broadcast_infoから開始時間を文字列形式に変換
+        start_time_str = ""
+        if broadcast_info.get('start_time'):
+            try:
+                from datetime import datetime
+                timestamp = int(broadcast_info['start_time'])
+                start_time_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            except:
+                start_time_str = ""
         
         # 全コメントを一括挿入
         comment_data = []
@@ -370,14 +398,18 @@ def save_all_comments(db_manager: DatabaseManager, broadcast_id: int,
                 elapsed_time,
                 is_special,
                 safe_int(comment.get('premium', 0)),
-                bool(comment.get('anonymity', False))
+                bool(comment.get('anonymity', False)),
+                broadcast_info.get('live_title', ''),  # ★broadcast_title
+                start_time_str,  # ★broadcast_start_time
+                broadcast_info.get('lv_value', '')  # ★broadcast_lv_id
             ))
         
         cursor.executemany('''
             INSERT INTO comments 
             (broadcast_id, user_id, user_name, comment_text, comment_no, 
-             timestamp, elapsed_time, is_special_user, premium, anonymity)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             timestamp, elapsed_time, is_special_user, premium, anonymity,
+             broadcast_title, broadcast_start_time, broadcast_lv_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', comment_data)
         
         comments_saved = len(comment_data)

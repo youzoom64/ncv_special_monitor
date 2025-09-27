@@ -170,7 +170,11 @@ def create_user_detail_page(user_data, broadcast_info, template_dir, output_dir,
     analysis_text = user_data.get('ai_analysis', 'AI分析結果がありません。')
     
     # テンプレート変数を置換
-    html_content = template.replace('{{broadcast_title}}', broadcast_info.get('live_title', 'タイトル不明'))
+    title_text = broadcast_info.get('live_title', 'タイトル不明')
+    broadcast_url = f"https://live.nicovideo.jp/watch/{lv_value}"
+    title_link = f'<a href="{broadcast_url}" target="_blank" style="color:#007bff; text-decoration:none;">{title_text}</a>'
+
+    html_content = template.replace('{{broadcast_title}}', title_link)
     html_content = html_content.replace('{{start_time}}', format_start_time(broadcast_info.get('start_time', '')))
     html_content = html_content.replace('{{user_avatar}}', get_user_icon_path(user_data['user_id']))
     html_content = html_content.replace('{{user_name}}', user_data['user_name'])
@@ -178,7 +182,7 @@ def create_user_detail_page(user_data, broadcast_info, template_dir, output_dir,
     html_content = html_content.replace('{{user_id}}', user_data['user_id'])
     html_content = html_content.replace('{{comment_rows}}', comment_rows)
     html_content = html_content.replace('{{analysis_text}}', analysis_text)
-    
+
     # ファイル保存
     output_filename = f"{subfolder_name}_{lv_value}_detail.html"
     output_path = os.path.join(output_dir, output_filename)

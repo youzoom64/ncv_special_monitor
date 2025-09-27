@@ -169,12 +169,17 @@ def analyze_single_user(user_data, config):
     )
 
     # プロンプト決定
-    if ai_analysis_config.get("use_default_prompt", True):
+    print(f"[DEBUG] ai_analysis_config: {ai_analysis_config}")
+    use_default = ai_analysis_config.get("use_default_prompt", True)
+    print(f"[DEBUG] use_default_prompt: {use_default}")
+    if use_default:
         # デフォルトプロンプトを使用
         prompt_template = ai_settings.get("default_analysis_prompt", "")
+        print(f"[DEBUG] Using DEFAULT prompt: {prompt_template[:100]}...")
     else:
         # カスタムプロンプトを使用
         prompt_template = ai_analysis_config.get("custom_prompt", "")
+        print(f"[DEBUG] Using CUSTOM prompt: {prompt_template}")
 
     # 変数注入込みの最終プロンプトを構築
     full_prompt = build_analysis_prompt(user_data, config, prompt_template)
@@ -192,9 +197,13 @@ def analyze_single_user(user_data, config):
     log_to_gui(f"ユーザー {user_name} のAI分析を実行中...")
     try:
         if ai_model == "openai-gpt4o":
+            # グローバル設定からシステムプロンプトを取得
+            system_prompt = ai_settings.get("analysis_system_prompt", "あなたは配信コメントの分析専門家です。ユーザーの行動パターンや特徴を詳しく分析してください。")
+            print(f"[DEBUG] Using system prompt: {system_prompt}")
+
             analysis_result, used_prompt = generate_openai_analysis_with_prompt(
                 user_data, config, full_prompt,
-                system_prompt="あなたは配信コメントの分析専門家です。ユーザーの行動パターンや特徴を詳しく分析してください。",
+                system_prompt=system_prompt,
                 model_name="gpt-4o"
             )
             return {
@@ -303,10 +312,9 @@ def build_analysis_prompt(user_data, config, prompt_template: str) -> str:
 
     # コメント整形
     comment_texts = []
-    for c in user_data.get('comments', []):
-        timestamp = format_unix_time(c.get('date', ''))
+    for i, c in enumerate(user_data.get('comments', []), 1):
         text = c.get('text', '')
-        comment_texts.append(f"[{timestamp}] {text}")
+        comment_texts.append(f"{i} {text}")
     user_data_text = "\n".join(comment_texts)
 
     # 変数置換（失敗しても素通し）
@@ -323,6 +331,8 @@ def build_analysis_prompt(user_data, config, prompt_template: str) -> str:
             user_name=user_data.get('user_name') or f"ユーザー{user_data.get('user_id','')}",
             user_id=user_data.get('user_id', ''),
             lv_title=live_title,
+            comment_content=user_data_text,
+            comment_count=len(user_data.get('comments', [])),
             time=current_time,
             date=current_date,
             datetime=current_datetime
@@ -331,19 +341,7 @@ def build_analysis_prompt(user_data, config, prompt_template: str) -> str:
         print(f"プロンプト変数置換エラー: {e}")
 
     # 最終プロンプト
-    full_prompt = f"""
-{analysis_prompt}
-
-ユーザーID: {user_data.get('user_id','')}
-表示名: {user_data.get('user_name','')}
-総コメント数: {len(user_data.get('comments', []))}件
-
-コメント履歴:
-{user_data_text}
-
-上記のデータを基に、このユーザーの詳細な分析を日本語で行ってください。
-分析結果はHTML形式で出力し、<br>タグで改行してください。
-""".strip()
+    full_prompt = analysis_prompt
     return full_prompt
 
 
@@ -434,7 +432,10 @@ def generate_openai_analysis(user_data, config):
             print(f"プロンプト変数置換エラー: {e}")
             # 変数置換に失敗してもプロンプトはそのまま使用
         
-        system_prompt = "あなたは配信コメントの分析専門家です。ユーザーの行動パターンや特徴を詳しく分析してください。"
+        # グローバル設定からシステムプロンプトを取得
+        api_settings = config.get("api_settings", {}) if isinstance(config, dict) else {}
+        system_prompt = api_settings.get("analysis_system_prompt", "あなたは配信コメントの分析専門家です。ユーザーの行動パターンや特徴を詳しく分析してください。")
+        print(f"[DEBUG] Using system prompt (generate_openai_analysis): {system_prompt}")
         
         full_prompt = f"""
 {analysis_prompt}

@@ -316,7 +316,7 @@ class HierarchicalConfigManager:
         default_response = default_user.get("default_response", {})
 
         # メッセージテンプレートを実際の名前で置換
-        default_messages = default_response.get("messages", [f">>{'{no}'} こんにちは、{display_name}さん"])
+        default_messages = default_response.get("messages", [])
         processed_messages = []
         for message in default_messages:
             processed_message = message.replace("{{display_name}}", display_name)

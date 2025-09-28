@@ -30,12 +30,13 @@ class PipelineExecutor:
                 'results': {}
             }
             
-            # ステップ定義（Step04を追加）
+            # ステップ定義（Step00とStep04を追加）
             steps = [
+                'step00_profile_monitor',   # ★ 新規追加
                 'step01_xml_parser',
                 'step02_special_user_filter',
                 'step03_html_generator',
-                'step04_database_storage'  # ★ 新規追加
+                'step04_database_storage'
             ]
             
             # 各ステップを順次実行
@@ -104,6 +105,17 @@ class PipelineExecutor:
         """パイプライン実行結果のサマリーを生成"""
         summary_parts = []
         
+        # Step00結果
+        if 'step00_profile_monitor' in results:
+            step00 = results['step00_profile_monitor']
+            if step00.get('success'):
+                if step00.get('profile_changed'):
+                    summary_parts.append("プロフィール=変更検出")
+                else:
+                    summary_parts.append("プロフィール=変更なし")
+            else:
+                summary_parts.append("プロフィール=エラー")
+
         # Step01結果
         if 'step01_xml_parser' in results:
             step01 = results['step01_xml_parser']

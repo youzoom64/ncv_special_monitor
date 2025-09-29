@@ -212,8 +212,8 @@ class HierarchicalConfigManager:
             print(f"新しい形式での読み込みエラー ({user_id}): {str(e)}")
 
         # フォールバック：旧形式から読み込み
-        users = self.get_all_special_users()
-        return users.get(user_id, self.create_default_user_config(user_id))
+        # users = self.get_all_special_users()
+        # return users.get(user_id, self.create_default_user_config(user_id))
 
     def save_user_config(self, user_id: str, user_config: dict):
         """ユーザー設定を保存"""

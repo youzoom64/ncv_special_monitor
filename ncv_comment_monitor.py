@@ -20,7 +20,29 @@ class NCVCommentServer:
     def __init__(self):
         print("[DEBUG] NCVCommentServer.__init__() 開始")
         self.clients = {}  # instance_id をキーにしたクライアント辞書
+
+        # ログ設定を確実に適用
         self.logger = logging.getLogger(__name__)
+        if not self.logger.handlers:
+            # ハンドラーが設定されていない場合は手動で設定
+            os.makedirs('logs', exist_ok=True)
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+            # ファイルハンドラー
+            file_handler = logging.FileHandler('logs/ncv_ws_server.log', encoding='utf-8')
+            file_handler.setFormatter(formatter)
+            file_handler.setLevel(logging.DEBUG)
+            self.logger.addHandler(file_handler)
+
+            # コンソールハンドラー
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(formatter)
+            console_handler.setLevel(logging.DEBUG)
+            self.logger.addHandler(console_handler)
+
+            self.logger.setLevel(logging.DEBUG)
+
+        self.logger.info("[SERVER] NCVCommentServer initialized")
         print("[DEBUG] HierarchicalConfigManager初期化")
         self.config_manager = HierarchicalConfigManager()
         self.special_users_cache = {}  # user_id をキーにした特別ユーザー設定のキャッシュ
@@ -681,6 +703,11 @@ class NCVCommentServer:
                     original_message = message
                     self.logger.info(f"[TEMPLATE] Original message: '{original_message}'")
                     self.logger.info(f"[TEMPLATE] Comment number to replace: {comment_no}")
+
+                    # ログファイルに確実に出力されるよう強制フラッシュ
+                    for handler in self.logger.handlers:
+                        if hasattr(handler, 'flush'):
+                            handler.flush()
                     # 時間情報を取得
                     import datetime
                     now = datetime.datetime.now()
@@ -711,6 +738,12 @@ class NCVCommentServer:
                         self.logger.info(f"[TEMPLATE] Using broadcaster_name: {broadcaster_name}")
 
                     self.logger.info(f"[TEMPLATE] Final message after template replacement: '{message}'")
+
+                    # ログファイルに確実に出力されるよう強制フラッシュ
+                    for handler in self.logger.handlers:
+                        if hasattr(handler, 'flush'):
+                            handler.flush()
+
                     return message
                 else:
                     self.logger.debug(f"[DEBUG] No predefined messages available")

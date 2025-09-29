@@ -240,3 +240,41 @@ main.bat  # GUIアプリケーション起動
 - ユーザー名取得ツール
 - RAG検索システム
 - データベクトル化ツール
+
+## 🗃️ データベースビュー
+
+### comments_with_broadcast ビュー
+
+コメントデータと放送情報を簡単に取得するためのSQLビューです。
+
+**作成済みビュー**：
+```sql
+CREATE VIEW comments_with_broadcast AS
+SELECT
+    c.*,
+    b.lv_value as broadcast_lv_id,
+    b.live_title as broadcast_title,
+    b.start_time as broadcast_start_time
+FROM comments c
+JOIN broadcasts b ON c.broadcast_id = b.id;
+```
+
+**使用例**：
+```python
+# 特定ユーザーのコメントを放送情報と一緒に取得
+cursor.execute("SELECT * FROM comments_with_broadcast WHERE user_id = ?", (user_id,))
+
+# 特別ユーザーのコメントのみ取得
+cursor.execute("SELECT * FROM comments_with_broadcast WHERE is_special_user = 1")
+```
+
+**取得可能な追加情報**：
+- `broadcast_lv_id`: 放送ID（例：lv348354633）
+- `broadcast_title`: 放送タイトル（例：始めてAI絵を覚えました）
+- `broadcast_start_time`: 放送開始時間（UNIXタイムスタンプ）
+
+**メリット**：
+- JOINクエリを書く必要がない
+- 既存の保存・取得ロジックは変更不要
+- データの整合性が常に保持される
+- コードが簡潔になる

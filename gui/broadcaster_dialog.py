@@ -8,7 +8,7 @@ import tkinter.messagebox as messagebox
 from .utils import log_to_gui
 from .trigger_dialog import TriggerManagementDialog
 from .simple_dialogs import SimpleBroadcasterEditDialog
-from bulk_broadcaster_registration import show_bulk_registration_dialog
+from libs.bulk_broadcaster_registration import show_bulk_registration_dialog
 
 
 class BroadcasterManagementDialog:

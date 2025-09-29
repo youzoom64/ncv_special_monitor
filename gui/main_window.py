@@ -15,11 +15,11 @@ from datetime import datetime
 from config_manager import HierarchicalConfigManager
 from logger import NCVSpecialLogger
 from file_monitor import NCVFolderMonitor
-from broadcast_detector import BroadcastEndDetector
+from processors.broadcast_detector import BroadcastEndDetector
 from pipeline import PipelineExecutor
 from ncv_comment_monitor import NCVCommentServer
-import bulk_broadcaster_registration
-from bulk_broadcaster_registration import show_bulk_registration_dialog
+import libs.bulk_broadcaster_registration as bulk_broadcaster_registration
+from libs.bulk_broadcaster_registration import show_bulk_registration_dialog
 import asyncio
 
 from .utils import log_to_gui, set_main_app

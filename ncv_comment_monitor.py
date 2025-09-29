@@ -977,12 +977,13 @@ class NCVCommentServer:
 
 async def main():
     # ログ設定
+    os.makedirs('logs', exist_ok=True)
     logging.basicConfig(
         level=logging.DEBUG,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler('ncv_ws_server.log', encoding='utf-8')
+            logging.FileHandler('logs/ncv_ws_server.log', encoding='utf-8')
         ]
     )
     

@@ -31,6 +31,15 @@ Thumbs.db
 *.json
 *.csv
 
+# データベースとデータディレクトリ
+data/
+
+# ユーザー設定とプライベートディレクトリ
+SpecialUser/
+
+# 設定ファイル（APIキー等機密情報含む）
+config/
+
 # Pipenv / Poetry
 Pipfile.lock
 poetry.lock

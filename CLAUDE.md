@@ -38,7 +38,7 @@ NCVスペシャルモニターシステムは、ニコニコ生放送の特定�
 
 ### 中心ファイル
 - `file_monitor.py` - NCVフォルダ監視
-- `broadcast_detector.py` - 放送終了検出
+- `processors/broadcast_detector.py` - 放送終了検出（移動済み）
 - `pipeline.py` - パイプライン実行管理
 - `processors/` - 各ステップの処理
 
@@ -51,7 +51,7 @@ NCVスペシャルモニターシステムは、ニコニコ生放送の特定�
 - `_start_xml_monitoring()` - 監視開始とパイプライン準備
 
 #### 2. 放送終了検出フェーズ
-**broadcast_detector.py**
+**processors/broadcast_detector.py**
 - `BroadcastEndDetector`クラスが放送終了を監視
 - ニコニコ生放送のAPIを定期的にチェック
 - 放送終了確認後にパイプライン実行をトリガー
@@ -79,26 +79,69 @@ NCVスペシャルモニターシステムは、ニコニコ生放送の特定�
 - SQLiteデータベースにデータを保存
 - ベクトル化処理の準備
 
-## 📁 主要ディレクトリ構造
+## 📁 ディレクトリ構造（整理後）
 
 ```
 ncv_special_monitor/
-├── ncv_comment_monitor.py      # WebSocketサーバー（リアルタイム応答）
-├── file_monitor.py             # NCVフォルダ監視
-├── broadcast_detector.py       # 放送終了検出
-├── pipeline.py                 # パイプライン実行管理
-├── config_manager.py           # 設定管理
-├── processors/                 # パイプライン各ステップ
+├── main.py                      # GUIアプリケーションエントリーポイント
+├── ncv_comment_monitor.py       # WebSocketサーバー（リアルタイム応答）
+├── file_monitor.py              # NCVフォルダ監視
+├── pipeline.py                  # パイプライン実行管理
+├── config_manager.py            # 設定管理（システム中核）
+├── logger.py                    # ログ機能（システム中核）
+├── main.bat                     # 実行用バッチファイル
+├── ncv_comment_monitor.bat      # WebSocketサーバー起動用バッチ
+├── requirements.txt             # Python依存関係
+├── CLAUDE.md                    # システム概要（このファイル）
+│
+├── processors/                  # パイプライン各ステップ
+│   ├── broadcast_detector.py    # 放送終了検出（移動済み）
 │   ├── step00_profile_monitor.py
 │   ├── step01_xml_parser.py
 │   ├── step02_special_user_filter.py
 │   ├── step03_html_generator.py
 │   └── step04_database_storage.py
-├── gui/                        # GUI関連
-├── config/                     # 設定ファイル
-├── data/                       # データベース
-├── SpecialUser/               # 特別ユーザー設定・出力
-└── templates/                 # HTMLテンプレート
+│
+├── gui/                         # GUI関連
+│   ├── __init__.py
+│   ├── main_window.py           # メインGUIウィンドウ
+│   ├── utils.py                 # GUI共通ユーティリティ
+│   └── （その他GUIコンポーネント）
+│
+├── libs/                        # ライブラリ機能
+│   ├── bulk_broadcaster_registration.py  # 一括配信者登録機能
+│   └── specialuser_follow_fetcher.py     # フォロー情報取得
+│
+├── utils/                       # ユーティリティスクリプト
+│   ├── README.md                # ユーティリティマニュアル
+│   ├── extract_comments.py      # コメント抽出ツール
+│   ├── JsonStepper.py           # JSON値段階コピーツール
+│   ├── name_extractor.py        # ニコニコユーザー名取得
+│   ├── QueryRefinerRAG.py       # RAG検索システム（新版）
+│   └── vectorize_existing_data.py # データベクトル化ツール
+│
+├── unsorted/                    # 未整理・古いファイル
+│   ├── main_old.py              # 古いメインファイル
+│   ├── rag_system.py            # 古いRAGシステム
+│   ├── rag/                     # 古いRAG関連ファイル
+│   └── （その他移動済みファイル）
+│
+├── config/                      # 設定ファイル（gitignore）
+│   ├── global_config.json       # グローバル設定
+│   ├── ncv_special_config.json  # API設定（機密）
+│   └── （その他設定ファイル）
+│
+├── data/                        # データベース（gitignore）
+│   ├── ncv_monitor.db           # メインデータベース
+│   └── vectors.db               # ベクトル化データベース
+│
+├── SpecialUser/                 # 特別ユーザー設定・出力（gitignore）
+├── templates/                   # HTMLテンプレート
+├── logs/                        # ログファイル
+├── pipeline_test_output/        # パイプラインテスト出力
+├── libs/                        # ライブラリファイル
+├── rec/                         # 録画関連
+└── venv/                        # Python仮想環境
 ```
 
 ## 🔗 システム間の連携
@@ -117,36 +160,45 @@ ncv_special_monitor/
 
 ## 🚀 実行方法
 
-### リアルタイム応答システム
+### メインGUIアプリケーション（推奨）
+```bash
+python main.py
+```
+
+### WebSocketサーバー単体実行
 ```bash
 python ncv_comment_monitor.py
+# または
+ncv_comment_monitor.bat
 ```
 
-### ファイル監視・HTML生成システム
+### バッチファイル実行
 ```bash
-python main.py  # GUIアプリケーション起動
+main.bat  # GUIアプリケーション起動
 ```
 
-## ⚙️ 設定ファイル
+## ⚙️ 設定ファイル（config/ディレクトリ）
 
-- `config/global_config.json` - グローバル設定
+- `global_config.json` - グローバル設定
+- `ncv_special_config.json` - API設定（OpenAI、Google APIキー等）
 - `SpecialUser/{user_id}_{username}/config.json` - ユーザー別設定
-- `config/database_config.json` - データベース設定
 
 ## 📊 出力ファイル
 
-- HTMLファイル: `SpecialUser/{user_id}_{username}/`
-- データベース: `data/ncv_monitor.db`
-- ログファイル: `logs/`
-- 一時ファイル: `pipeline_test_output/`
+- **HTMLファイル**: `SpecialUser/{user_id}_{username}/`
+- **データベース**: `data/ncv_monitor.db`, `data/vectors.db`
+- **ログファイル**: `logs/`
+- **一時ファイル**: `pipeline_test_output/`
 
 ## 🔧 主要な依存関係
 
-- `websockets` - WebSocket通信
-- `requests` - HTTP通信（放送終了検出）
-- `sqlite3` - データベース
-- `tkinter` - GUI
-- `threading` - マルチスレッド処理
+- **WebSocket通信**: `websockets`
+- **HTTP通信**: `requests`（放送終了検出）
+- **データベース**: `sqlite3`
+- **GUI**: `tkinter`
+- **並行処理**: `threading`
+- **AI機能**: `openai`, `google.generativeai`
+- **Web scraping**: `selenium`, `beautifulsoup4`
 
 ## 💡 開発・デバッグ時の注意点
 
@@ -165,3 +217,26 @@ python main.py  # GUIアプリケーション起動
 4. **設定管理**
    - JSON設定ファイルの構文エラーに注意
    - ユーザー設定の有効/無効状態を確認
+   - APIキーの適切な設定
+
+5. **ファイル整理後の変更点**
+   - `broadcast_detector.py` → `processors/broadcast_detector.py`
+   - 各種ユーティリティ → `utils/`ディレクトリ
+   - ライブラリ機能 → `libs/`ディレクトリ
+   - 古いファイル → `unsorted/`ディレクトリ
+
+## 🔒 セキュリティ考慮事項
+
+- `config/`ディレクトリは`.gitignore`で除外（APIキー保護）
+- `data/`ディレクトリは`.gitignore`で除外（データベース保護）
+- `SpecialUser/`ディレクトリは`.gitignore`で除外（プライベートデータ保護）
+
+## 📝 ユーティリティツール
+
+`utils/`ディレクトリには各種補助ツールが格納されています。詳細は`utils/README.md`を参照してください。
+
+- コメント抽出ツール
+- JSON処理ツール
+- ユーザー名取得ツール
+- RAG検索システム
+- データベクトル化ツール

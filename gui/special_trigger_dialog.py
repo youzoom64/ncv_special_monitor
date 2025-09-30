@@ -2,7 +2,7 @@
 スペシャルトリガー管理ダイアログ
 """
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
 import tkinter.messagebox as msgbox
 import random
 
@@ -265,7 +265,7 @@ class SpecialTriggerEditDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("スペシャルトリガー編集" if is_edit_mode else "スペシャルトリガー追加")
-        self.dialog.geometry("500x550")  # 縦を長くして下部ボタンが見えるように
+        self.dialog.geometry("550x750")  # 外部プログラム設定のため更に縦を長く
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -399,13 +399,28 @@ class SpecialTriggerEditDialog:
             "messages": messages,
             "ai_response_prompt": self.ai_prompt_var.get(),
             "ignore_all_limits": self.ignore_limits_var.get(),
-            "firing_probability": int(self.probability_var.get() or 100)
+            "firing_probability": int(self.probability_var.get() or 100),
+            "execute_program": self.execute_program_var.get(),
+            "program_path": self.program_path_var.get().strip(),
+            "program_args": self.program_args_var.get().strip()
         }
 
         self.config_manager.save_special_trigger_config(self.user_id, trigger_config)
         log_to_gui(f"スペシャルトリガー '{name}' を保存しました")
         self.result = True
         self.dialog.destroy()
+
+    def browse_program(self):
+        """プログラムファイル参照"""
+        file_path = filedialog.askopenfilename(
+            title="実行するプログラムを選択",
+            filetypes=[
+                ("実行ファイル", "*.exe *.bat *.cmd"),
+                ("すべてのファイル", "*.*")
+            ]
+        )
+        if file_path:
+            self.program_path_var.set(file_path)
 
     def cancel(self):
         """キャンセル"""

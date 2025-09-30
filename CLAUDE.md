@@ -33,6 +33,8 @@ NCVスペシャルモニターシステムは、ニコニコ生放送の特定�
 - WebSocketクライアント管理
 - コメントの双方向通信
 - 自動応答システム
+- **スペシャルトリガー機能**（配信者に関係なく最優先で発火）
+- **外部プログラム実行機能**（exe/bat/cmdファイルの自動実行）
 
 ## 🔵 流れ2: HTML生成システム（ファイル監視→パイプライン）
 
@@ -278,3 +280,140 @@ cursor.execute("SELECT * FROM comments_with_broadcast WHERE is_special_user = 1"
 - 既存の保存・取得ロジックは変更不要
 - データの整合性が常に保持される
 - コードが簡潔になる
+
+## 🎯 スペシャルトリガー機能
+
+### 概要
+
+スペシャルトリガーは、**全配信者に共通して適用される最優先トリガー**です。通常のトリガーや反応回数制限を無視して、緊急時や特定の重要なキーワードに即座に反応できます。
+
+### 特徴
+
+1. **最優先実行**
+   - 配信者トリガーより前にチェック
+   - デフォルト応答より優先
+   - 反応回数制限より前に評価
+
+2. **`ignore_all_limits`機能**
+   - `true`に設定すると、すべての反応回数制限を無視
+   - 何度でも反応可能
+   - 緊急通知などに最適
+
+3. **配信者非依存**
+   - どの配信者の放送でも発火
+   - ユーザー単位で一元管理
+
+4. **外部プログラム実行**
+   - exe、bat、cmdファイルを自動実行
+   - 変数置換対応
+   - バックグラウンド実行
+
+### 設定方法
+
+**GUI操作：**
+1. ユーザー編集画面を開く
+2. 「スペシャルトリガーを有効化」にチェック
+3. 「スペシャルトリガー管理」をクリック
+4. トリガーを追加・編集
+
+**設定項目：**
+- **名前**: トリガーの識別名
+- **キーワード**: 反応するキーワード（1行1つ）
+- **条件**: OR（いずれか）/ AND（すべて）
+- **応答タイプ**: 定型メッセージ / AI生成
+- **発動確率**: 0-100%
+- **全制限を無視**: 反応回数制限を無視
+- **外部プログラム実行**: exe/batファイルの自動実行
+
+### 外部プログラム実行機能
+
+#### 設定手順
+
+1. スペシャルトリガー編集画面で「外部プログラムを実行」にチェック
+2. 「参照」ボタンで実行ファイルを選択
+3. 必要に応じて引数を設定
+
+#### 使用可能な変数
+
+引数には以下の変数を使用できます：
+
+- `{user_name}` - コメントしたユーザーの表示名
+- `{user_id}` - ユーザーID
+- `{comment}` - コメント内容
+- `{live_id}` - 放送ID
+
+**例：**
+```
+プログラムパス: C:\Tools\notify.exe
+引数: --title "緊急通知" --user "{user_name}" --message "{comment}"
+```
+
+#### 実行仕様
+
+- **非同期実行**: システムの動作をブロックしない
+- **バックグラウンド実行**: ウィンドウを表示しない
+- **エラーハンドリング**: 失敗時もシステムは継続動作
+- **ログ出力**: 実行状況を`[EXTERNAL_PROGRAM]`タグでログ出力
+
+### 動作の流れ
+
+```
+コメント受信
+  ↓
+ユーザー有効チェック
+  ↓
+【スペシャルトリガーチェック】← 最優先
+  ├─ キーワードマッチ？
+  ├─ 発動確率チェック
+  ├─ 反応回数チェック（ignore_all_limitsで無視可能）
+  └─ マッチした場合：
+      ├─ 外部プログラム実行（設定時）
+      └─ 応答メッセージ送信
+  ↓
+通常の反応回数制限チェック
+  ↓
+配信者トリガーチェック
+  ↓
+デフォルト応答
+```
+
+### 設定ファイル構造
+
+```json
+{
+  "special_triggers_enabled": true,
+  "special_triggers": [
+    {
+      "id": null,
+      "name": "緊急通知",
+      "enabled": true,
+      "keywords": ["緊急", "助けて"],
+      "keyword_condition": "OR",
+      "response_type": "ai",
+      "messages": ["緊急事態を検知しました"],
+      "ai_response_prompt": "緊急事態として対応してください",
+      "ignore_all_limits": true,
+      "firing_probability": 100,
+      "execute_program": true,
+      "program_path": "C:/Tools/emergency_alert.exe",
+      "program_args": "--user {user_name} --comment \"{comment}\""
+    }
+  ]
+}
+```
+
+### 実装ファイル
+
+- **GUI**: `gui/special_trigger_dialog.py` - 管理・編集画面
+- **処理**: `ncv_comment_monitor.py` - トリガー判定・実行処理
+- **設定**: `config_manager.py` - 設定の読み書き
+
+### ログ出力例
+
+```
+[SPECIAL_TRIGGER] Matched special trigger: 緊急通知
+[SPECIAL_TRIGGER] ignore_all_limits is enabled, bypassing all reaction limits
+[EXTERNAL_PROGRAM] Executing: C:/Tools/emergency_alert.exe --user ようずん --comment "緊急"
+[EXTERNAL_PROGRAM] Successfully launched: C:/Tools/emergency_alert.exe
+[SPECIAL_TRIGGER] Generated response: 緊急事態を検知しました
+```

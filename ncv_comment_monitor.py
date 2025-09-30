@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 import requests
 import re
+import subprocess
 
 # config_manager を import
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -569,6 +570,10 @@ class NCVCommentServer:
                             else:
                                 self.logger.info(f"[SPECIAL_TRIGGER] ignore_all_limits is enabled, bypassing all reaction limits")
 
+                            # 外部プログラム実行
+                            if special_trigger.get("execute_program", False):
+                                self.execute_external_program(special_trigger, user_name, user_id, comment, live_id)
+
                             # 応答メッセージ生成
                             response = self.generate_response_message(
                                 special_trigger, user_name, comment, None, comment_no, user_id
@@ -720,6 +725,50 @@ class NCVCommentServer:
             import traceback
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             return None
+
+    def execute_external_program(self, trigger: dict, user_name: str, user_id: str, comment: str, live_id: str):
+        """外部プログラムを実行"""
+        try:
+            program_path = trigger.get("program_path", "").strip()
+            program_args = trigger.get("program_args", "").strip()
+
+            if not program_path:
+                self.logger.warning(f"[EXTERNAL_PROGRAM] Program path is empty, skipping execution")
+                return
+
+            # 変数を置換
+            replacements = {
+                "{user_name}": user_name,
+                "{user_id}": user_id,
+                "{comment}": comment,
+                "{live_id}": live_id
+            }
+
+            for key, value in replacements.items():
+                program_args = program_args.replace(key, value)
+
+            # コマンドを構築
+            if program_args:
+                cmd = [program_path] + program_args.split()
+            else:
+                cmd = [program_path]
+
+            self.logger.info(f"[EXTERNAL_PROGRAM] Executing: {' '.join(cmd)}")
+
+            # プログラムを実行（非同期・バックグラウンド）
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+
+            self.logger.info(f"[EXTERNAL_PROGRAM] Successfully launched: {program_path}")
+
+        except Exception as e:
+            self.logger.error(f"[EXTERNAL_PROGRAM] Failed to execute program: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def check_trigger_match(self, trigger: dict, comment: str) -> bool:
         """トリガーがコメントにマッチするかチェック"""

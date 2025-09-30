@@ -88,7 +88,7 @@ class UserEditDialog:
         prompt_text_frame = ttk.Frame(ai_frame)
         prompt_text_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
-        self.custom_prompt_text = tk.Text(prompt_text_frame, height=4, wrap=tk.WORD)
+        self.custom_prompt_text = tk.Text(prompt_text_frame, height=10, wrap=tk.WORD)
         prompt_scrollbar = ttk.Scrollbar(prompt_text_frame, orient=tk.VERTICAL, command=self.custom_prompt_text.yview)
         self.custom_prompt_text.configure(yscrollcommand=prompt_scrollbar.set)
 
@@ -131,7 +131,7 @@ class UserEditDialog:
         msg_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
         ttk.Label(msg_frame, text="定型メッセージ (1行1メッセージ):").pack(anchor=tk.W)
-        self.messages_text = tk.Text(msg_frame, height=4)
+        self.messages_text = tk.Text(msg_frame, height=1)
         self.messages_text.pack(fill=tk.BOTH, expand=True)
         messages = self.user_config.get("default_response", {}).get("messages", [])
         self.messages_text.insert("1.0", "\n".join(messages))

@@ -206,6 +206,7 @@ class HierarchicalConfigManager:
                         "default_response": new_config.get("default_response", {}),
                         "broadcasters": new_config.get("broadcasters", {}),
                         "special_triggers": new_config.get("special_triggers", []),
+                        "special_triggers_enabled": new_config.get("special_triggers_enabled", False),
                         "metadata": new_config.get("metadata", {})
                     }
         except Exception as e:

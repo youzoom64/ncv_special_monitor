@@ -23,7 +23,7 @@ class UserEditDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("スペシャルユーザー編集" if user_id else "スペシャルユーザー追加")
-        self.dialog.geometry("1000x700")  # 幅を広げる
+        self.dialog.geometry("1000x850")  # 縦を長くして下部ボタンが見えるように
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -169,7 +169,11 @@ class UserEditDialog:
         special_trigger_control_frame = ttk.Frame(triggers_frame)
         special_trigger_control_frame.pack(fill=tk.X)
 
-        self.special_triggers_enabled_var = tk.BooleanVar(value=self.user_config.get("special_triggers_enabled", False))
+        # 修正: self.user_configから取得
+        special_triggers_enabled_value = self.user_config.get("special_triggers_enabled", False)
+        print(f"[DEBUG] user_dialog.py:173 - special_triggers_enabled from config: {special_triggers_enabled_value}")
+        print(f"[DEBUG] user_dialog.py:173 - user_config keys: {list(self.user_config.keys())}")
+        self.special_triggers_enabled_var = tk.BooleanVar(value=special_triggers_enabled_value)
         ttk.Checkbutton(special_trigger_control_frame, text="スペシャルトリガーを有効化", variable=self.special_triggers_enabled_var).pack(side=tk.LEFT)
 
         ttk.Button(special_trigger_control_frame, text="スペシャルトリガー管理", command=self.manage_special_triggers).pack(side=tk.LEFT, padx=(10, 0))
@@ -311,6 +315,10 @@ class UserEditDialog:
         dialog = SpecialTriggerManagementDialog(self.dialog, self.config_manager, user_id)
         self.dialog.wait_window(dialog.dialog)
 
+        # スペシャルトリガー管理画面から戻ってきたら、設定を再読み込みしてチェックボックスを更新
+        self.user_config = self.config_manager.get_user_config(user_id)
+        self.special_triggers_enabled_var.set(self.user_config.get("special_triggers_enabled", False))
+
     def save_user(self):
         """ユーザー保存"""
         user_id = self.user_id_var.get().strip()
@@ -330,16 +338,13 @@ class UserEditDialog:
 
         # 👇 ここで update_user を定義する（最新設定を読み込んでから更新）
         def update_user(config):
-            # 最新の設定を読み込み
-            latest_config = self.config_manager.get_user_config(user_id)
-
-            # UI で変更された項目のみ更新
+            # UI で変更された項目のみ上書き（latest_configの再取得は不要）
             config["user_info"] = {
                 "user_id": user_id,
                 "display_name": display_name,
                 "enabled": self.user_enabled_var.get(),
-                "description": latest_config.get("user_info", {}).get("description", ""),
-                "tags": latest_config.get("user_info", {}).get("tags", [])
+                "description": config.get("user_info", {}).get("description", ""),
+                "tags": config.get("user_info", {}).get("tags", [])
             }
             config["ai_analysis"] = {
                 "enabled": self.analysis_enabled_var.get(),
@@ -356,12 +361,17 @@ class UserEditDialog:
                 "response_delay_seconds": int(self.delay_var.get() or 0),
                 "response_split_delay_seconds": float(self.split_delay_var.get() or 1)
             }
-            # スペシャルトリガー有効フラグを保存
+            
+            # スペシャルトリガー有効フラグをUIの値で保存
             config["special_triggers_enabled"] = self.special_triggers_enabled_var.get()
-            # 最新の設定から他の項目を維持
-            config["special_triggers"] = latest_config.get("special_triggers", [])
-            config["broadcasters"] = latest_config.get("broadcasters", {})
-            config["metadata"] = latest_config.get("metadata", {})
+            
+            # 既存のデータを保持（configには既に最新データが入っている）
+            if "special_triggers" not in config:
+                config["special_triggers"] = []
+            if "broadcasters" not in config:
+                config["broadcasters"] = {}
+            if "metadata" not in config:
+                config["metadata"] = {}
 
         # 👇 そしてこれを渡す
         print(f"[DEBUG] 保存開始: user_id={user_id}")
@@ -379,6 +389,7 @@ class UserEditDialog:
             import traceback
             traceback.print_exc()
             log_to_gui(f"保存エラー: {str(e)}")
+
 
 
     def on_prompt_mode_change(self):

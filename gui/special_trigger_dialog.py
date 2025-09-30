@@ -25,7 +25,7 @@ class SpecialTriggerManagementDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("スペシャルトリガー管理")
-        self.dialog.geometry("700x400")
+        self.dialog.geometry("700x550")  # 縦を長くして下部ボタンが見えるように
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -40,21 +40,6 @@ class SpecialTriggerManagementDialog:
         # 説明
         info_label = ttk.Label(main_frame, text="スペシャルトリガーは全ての設定を無視して最優先で発動します", font=("", 9))
         info_label.pack(anchor=tk.W, pady=(0, 10))
-
-        # スペシャルトリガー全体の有効化チェックボックス
-        user_config = self.config_manager.get_user_config(self.user_id)
-        self.special_triggers_enabled_var = tk.BooleanVar(value=user_config.get("special_triggers_enabled", False))
-
-        enable_frame = ttk.Frame(main_frame)
-        enable_frame.pack(fill=tk.X, pady=(0, 10))
-
-        self.enable_checkbox = ttk.Checkbutton(
-            enable_frame,
-            text="スペシャルトリガー機能を有効化",
-            variable=self.special_triggers_enabled_var,
-            command=self.on_special_triggers_enabled_change
-        )
-        self.enable_checkbox.pack(anchor=tk.W)
 
         # トリガー一覧
         list_frame = ttk.LabelFrame(main_frame, text="スペシャルトリガー一覧", padding="5")
@@ -80,6 +65,8 @@ class SpecialTriggerManagementDialog:
 
         # チェックボックスクリック処理をバインド
         self.triggers_tree.bind("<Button-1>", self.on_trigger_click)
+        # ダブルクリックで編集画面へ移動
+        self.triggers_tree.bind("<Double-1>", self.on_trigger_double_click)
 
         self.triggers_tree.pack(fill=tk.BOTH, expand=True)
 
@@ -94,22 +81,6 @@ class SpecialTriggerManagementDialog:
         ttk.Button(button_frame, text="削除", command=self.delete_trigger).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(button_frame, text="閉じる", command=self.close_dialog).pack(side=tk.RIGHT)
 
-    def on_special_triggers_enabled_change(self):
-        """スペシャルトリガー全体の有効化状態が変更された時の処理"""
-        enabled = self.special_triggers_enabled_var.get()
-
-        # 設定を保存
-        def update_special_triggers_enabled(config):
-            config["special_triggers_enabled"] = enabled
-
-        success = self.config_manager._safe_save_user_config(self.user_id, update_special_triggers_enabled)
-        if success:
-            status = "有効" if enabled else "無効"
-            log_to_gui(f"スペシャルトリガー機能を{status}にしました")
-        else:
-            log_to_gui("スペシャルトリガー設定の保存に失敗しました")
-            # 失敗した場合は元の状態に戻す
-            self.special_triggers_enabled_var.set(not enabled)
 
     def refresh_triggers_list(self):
         """トリガー一覧を更新"""
@@ -140,6 +111,44 @@ class SpecialTriggerManagementDialog:
         self.dialog.wait_window(dialog.dialog)
         if dialog.result:
             self.refresh_triggers_list()
+
+    def on_trigger_double_click(self, event):
+        """トリガーダブルクリック処理"""
+        # ダブルクリックされた項目と列を取得
+        item = self.triggers_tree.identify('item', event.x, event.y)
+        column = self.triggers_tree.identify('column', event.x, event.y)
+
+        if not item:
+            return
+
+        # チェックボックス列（#0）のダブルクリックは無視
+        if column == "#0":
+            return
+
+        # 選択されたトリガーの情報を取得
+        selected_index = self.triggers_tree.index(item)
+        triggers = self.config_manager.get_user_special_triggers(self.user_id)
+
+        print(f"[DEBUG] Double-click: selected_index={selected_index}, triggers count={len(triggers)}")
+
+        if selected_index < len(triggers):
+            trigger = triggers[selected_index]
+            trigger_id = trigger.get("id")
+            trigger_name = trigger.get("name", "無名")
+
+            print(f"[DEBUG] Trigger: name={trigger_name}, id={trigger_id}")
+
+            # 編集ダイアログを開く（trigger_indexを渡す）
+            dialog = SpecialTriggerEditDialog(
+                self.dialog,
+                self.config_manager,
+                self.user_id,
+                trigger_id=trigger_id,
+                trigger_index=selected_index
+            )
+            self.dialog.wait_window(dialog.dialog)
+            if dialog.result:
+                self.refresh_triggers_list()
 
     def edit_trigger(self):
         """トリガー編集"""
@@ -228,24 +237,35 @@ class SpecialTriggerManagementDialog:
 
 
 class SpecialTriggerEditDialog:
-    def __init__(self, parent, config_manager, user_id, trigger_id=None):
+    def __init__(self, parent, config_manager, user_id, trigger_id=None, trigger_index=None):
         self.result = False
         self.config_manager = config_manager
         self.user_id = user_id
         self.trigger_id = trigger_id
+        self.trigger_index = trigger_index
 
         # 既存のトリガーがある場合は読み込み
         self.trigger_config = {}
-        if trigger_id:
-            triggers = config_manager.get_user_special_triggers(user_id)
+        triggers = config_manager.get_user_special_triggers(user_id)
+
+        # trigger_indexが指定されている場合はインデックスで取得
+        if trigger_index is not None and 0 <= trigger_index < len(triggers):
+            self.trigger_config = triggers[trigger_index].copy()
+            if self.trigger_config.get("id") is None:
+                self.trigger_id = None  # idがNoneの場合
+        # trigger_idが指定されている場合はIDで検索
+        elif trigger_id:
             for trigger in triggers:
                 if trigger.get("id") == trigger_id:
                     self.trigger_config = trigger.copy()
                     break
 
+        # 編集モードかどうかを判定（設定が読み込まれていれば編集モード）
+        is_edit_mode = bool(self.trigger_config)
+
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("スペシャルトリガー編集" if trigger_id else "スペシャルトリガー追加")
-        self.dialog.geometry("500x400")
+        self.dialog.title("スペシャルトリガー編集" if is_edit_mode else "スペシャルトリガー追加")
+        self.dialog.geometry("500x550")  # 縦を長くして下部ボタンが見えるように
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -322,6 +342,29 @@ class SpecialTriggerEditDialog:
 
         self.ignore_limits_var = tk.BooleanVar(value=self.trigger_config.get("ignore_all_limits", True))
         ttk.Checkbutton(settings_grid, text="全制限を無視", variable=self.ignore_limits_var).grid(row=0, column=2, sticky=tk.W)
+
+        # 外部プログラム実行設定
+        exec_frame = ttk.LabelFrame(main_frame, text="外部プログラム実行", padding="5")
+        exec_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.execute_program_var = tk.BooleanVar(value=self.trigger_config.get("execute_program", False))
+        ttk.Checkbutton(exec_frame, text="外部プログラムを実行", variable=self.execute_program_var).pack(anchor=tk.W)
+
+        ttk.Label(exec_frame, text="プログラムパス (.exe, .bat):").pack(anchor=tk.W, pady=(5, 0))
+
+        path_frame = ttk.Frame(exec_frame)
+        path_frame.pack(fill=tk.X, pady=(0, 5))
+
+        self.program_path_var = tk.StringVar(value=self.trigger_config.get("program_path", ""))
+        ttk.Entry(path_frame, textvariable=self.program_path_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(path_frame, text="参照", command=self.browse_program).pack(side=tk.LEFT, padx=(5, 0))
+
+        ttk.Label(exec_frame, text="引数（オプション）:").pack(anchor=tk.W)
+        self.program_args_var = tk.StringVar(value=self.trigger_config.get("program_args", ""))
+        ttk.Entry(exec_frame, textvariable=self.program_args_var).pack(fill=tk.X, pady=(0, 2))
+
+        help_text = ttk.Label(exec_frame, text="変数: {user_name}, {user_id}, {comment}, {live_id}", font=("", 8), foreground="gray")
+        help_text.pack(anchor=tk.W)
 
         # ボタン
         button_frame = ttk.Frame(main_frame)

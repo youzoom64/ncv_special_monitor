@@ -228,7 +228,7 @@ class NCVCommentServer:
             self.logger.info(f"[SpecialUser] Detected special user: {user_name} ({user_id})")
 
             response_message = await self.process_special_user_comment(
-                user_id, user_name, comment, live_id, instance_id, comment_no
+                user_id, user_name, comment, live_id, instance_id, comment_no, live_number=live_id
             )
 
             if response_message:
@@ -495,7 +495,7 @@ class NCVCommentServer:
                 'message': 'All user configurations reloaded'
             }))
 
-    async def process_special_user_comment(self, user_id: str, user_name: str, comment: str, live_id: str, instance_id: str, comment_no: int = 1, live_title: str = None) -> str:
+    async def process_special_user_comment(self, user_id: str, user_name: str, comment: str, live_id: str, instance_id: str, comment_no: int = 1, live_title: str = None, live_number: str = None ) -> str:
         """スペシャルユーザーのコメントを処理して応答メッセージを生成"""
         try:
             print(f"[DEBUG] コメント処理: {user_name}({user_id}) → '{comment}'")
@@ -508,7 +508,77 @@ class NCVCommentServer:
             user_config = user_cache['config']
             self.logger.debug(f"[DEBUG] User config loaded for {user_id}")
 
-            # === 最大反応数チェック追加 ===
+            # 最上位階層チェック: スペシャルユーザー自体が無効なら全て無効
+            user_info_enabled = user_config.get('user_info', {}).get('enabled', True)
+            overall_user_enabled = user_config.get('enabled', True)  # 直接形式もチェック
+            user_enabled = user_info_enabled and overall_user_enabled
+
+            self.logger.debug(f"[DEBUG] User enabled check: user_info.enabled={user_info_enabled}, direct.enabled={overall_user_enabled}, final={user_enabled}")
+            if not user_enabled:
+                self.logger.debug(f"[DEBUG] User {user_id} is disabled at top level, skipping all processing")
+                return None
+
+            # === スペシャルトリガーチェック（最優先・反応回数制限より前） ===
+            special_triggers_enabled = user_config.get('special_triggers_enabled', False)
+            special_triggers = user_config.get('special_triggers', [])
+
+            if special_triggers_enabled and special_triggers:
+                self.logger.debug(f"[DEBUG] Checking {len(special_triggers)} special triggers")
+
+                for i, special_trigger in enumerate(special_triggers):
+                    if not special_trigger.get('enabled', True):
+                        self.logger.debug(f"[DEBUG] Special trigger {i} disabled, skipping")
+                        continue
+
+                    self.logger.debug(
+                        f"[DEBUG] Checking special trigger {i}: name='{special_trigger.get('name', 'Unnamed')}', "
+                        f"keywords={special_trigger.get('keywords', [])}"
+                    )
+
+                    # スペシャルトリガーのキーワードマッチング
+                    if self.check_trigger_match(special_trigger, comment):
+                        self.logger.info(f"[SPECIAL_TRIGGER] Matched special trigger: {special_trigger.get('name', 'Unnamed')}")
+
+                        # 発動確率チェック
+                        firing_prob = special_trigger.get('firing_probability', 100)
+                        random_roll = random.randint(1, 100)
+                        self.logger.debug(f"[DEBUG] Special trigger firing probability check: {random_roll} <= {firing_prob}")
+
+                        if random_roll <= firing_prob:
+                            # ignore_all_limitsが有効な場合は反応回数制限を無視
+                            ignore_all_limits = special_trigger.get('ignore_all_limits', False)
+
+                            if not ignore_all_limits:
+                                # 通常の反応回数制限チェック
+                                special_trigger_id = special_trigger.get("id", f"special_trigger_{i}")
+                                special_trigger_counts = user_cache.setdefault("special_trigger_reaction_counts", {})
+                                st_count = special_trigger_counts.get(special_trigger_id, 0)
+
+                                # スペシャルトリガーの反応回数上限（デフォルトは無制限=999999）
+                                max_reactions = special_trigger.get("max_reactions_per_stream", 999999)
+
+                                if st_count >= max_reactions:
+                                    self.logger.debug(
+                                        f"[DEBUG] Max reactions reached for special trigger {special_trigger_id} "
+                                        f"({st_count}/{max_reactions}), skipping response"
+                                    )
+                                    continue
+
+                                # カウント更新
+                                special_trigger_counts[special_trigger_id] = st_count + 1
+                            else:
+                                self.logger.info(f"[SPECIAL_TRIGGER] ignore_all_limits is enabled, bypassing all reaction limits")
+
+                            # 応答メッセージ生成
+                            response = self.generate_response_message(
+                                special_trigger, user_name, comment, None, comment_no, user_id
+                            )
+                            self.logger.info(f"[SPECIAL_TRIGGER] Generated response: {response}")
+                            return response
+                        else:
+                            self.logger.debug(f"[DEBUG] Special trigger failed firing probability check")
+
+            # === スペシャルトリガーでマッチしなかった場合、通常の反応回数制限をチェック ===
             # ユーザー単位の反応カウントを取得
             reaction_count = user_cache.get("reaction_count", 0)
 
@@ -557,16 +627,6 @@ class NCVCommentServer:
 
                 # カウント更新
                 br_counts[active_broadcaster_id] = br_count + 1
-
-            # 最上位階層チェック: スペシャルユーザー自体が無効なら全て無効
-            user_info_enabled = user_config.get('user_info', {}).get('enabled', True)
-            overall_user_enabled = user_config.get('enabled', True)  # 直接形式もチェック
-            user_enabled = user_info_enabled and overall_user_enabled
-
-            self.logger.debug(f"[DEBUG] User enabled check: user_info.enabled={user_info_enabled}, direct.enabled={overall_user_enabled}, final={user_enabled}")
-            if not user_enabled:
-                self.logger.debug(f"[DEBUG] User {user_id} is disabled at top level, skipping all processing")
-                return None
 
             if not active_broadcaster:
                 self.logger.debug(f"[DEBUG] No active broadcaster found, checking user default response")
@@ -684,7 +744,7 @@ class NCVCommentServer:
             self.logger.debug(f"[DEBUG] OR condition matches: {matches}, result: {result}")
             return result
 
-    def generate_response_message(self, response_config: dict, user_name: str, comment: str, broadcaster_config: dict = None, comment_no: int = 1, user_id: str = '') -> str:
+    def generate_response_message(self, response_config: dict, user_name: str, comment: str, broadcaster_config: dict = None, comment_no: int = 1, user_id: str = '',live_title: str = None, live_number: str = None ) -> str:
         """応答メッセージを生成"""
         try:
             response_type = response_config.get('response_type', 'predefined')
@@ -753,7 +813,7 @@ class NCVCommentServer:
                 self.logger.debug(f"[DEBUG] Using AI response")
                 ai_prompt = response_config.get('ai_response_prompt', '')
                 if ai_prompt:
-                    ai_response = self.generate_ai_response(ai_prompt, user_name, comment, user_id, broadcaster_config, comment_no, trigger_content=comment, lv_title=live_title)
+                    ai_response = self.generate_ai_response(ai_prompt, user_name, comment, user_id, broadcaster_config, comment_no, trigger_content=comment, lv_title=live_title,lv_number=None)
                     if ai_response:
                         return ai_response
                     else:
@@ -772,7 +832,7 @@ class NCVCommentServer:
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    def generate_ai_response(self, prompt_template: str, user_name: str, comment: str, user_id: str, broadcaster_config: dict = None, comment_no: int = 1, trigger_content: str = None, lv_title: str = None) -> str:
+    def generate_ai_response(self, prompt_template: str, user_name: str, comment: str, user_id: str, broadcaster_config: dict = None, comment_no: int = 1, trigger_content: str = None, lv_title: str = None, lv_number=None) -> str:
         """AI応答を生成"""
         try:
             print(f"[DEBUG] AI応答生成: プロンプト='{prompt_template}'")

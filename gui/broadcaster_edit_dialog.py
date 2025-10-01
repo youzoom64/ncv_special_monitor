@@ -27,7 +27,7 @@ class BroadcasterEditDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("配信者編集" if broadcaster_id else "配信者追加")
-        self.dialog.geometry("1000x500")
+        self.dialog.geometry("1000x700")
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -71,9 +71,24 @@ class BroadcasterEditDialog:
         response_frame = ttk.LabelFrame(left_frame, text="この配信者でのデフォルト応答設定", padding="5")
         response_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        # デフォルト応答有効/無効チェックボックス
+        # AI分析カスタムプロンプト
+        self.ai_analysis_enabled_var = tk.BooleanVar(value=self.broadcaster_config.get("default_response", {}).get("ai_analysis_enabled", False))
+        ttk.Checkbutton(response_frame, text="AI分析カスタムプロンプトを使用", variable=self.ai_analysis_enabled_var).pack(anchor=tk.W, pady=(0, 2))
+
+        ttk.Label(response_frame, text="AI分析カスタムプロンプト:").pack(anchor=tk.W)
+        self.ai_analysis_prompt_text = tk.Text(response_frame, height=8, wrap=tk.WORD)
+        self.ai_analysis_prompt_text.pack(fill=tk.X, pady=(2, 2))
+        ai_analysis_prompt = self.broadcaster_config.get("default_response", {}).get("ai_analysis_prompt", "")
+        self.ai_analysis_prompt_text.insert("1.0", ai_analysis_prompt)
+
+        # AI分析プロンプトの説明
+        analysis_help_text = "この配信者に対するAI分析時の指示。配信の特徴や話題を指定することで精度が向上します。"
+        analysis_help_label = ttk.Label(response_frame, text=analysis_help_text, font=("", 8), foreground="gray")
+        analysis_help_label.pack(anchor=tk.W, pady=(0, 10))
+
+        # 定型メッセージ応答有効/無効チェックボックス
         self.default_response_enabled_var = tk.BooleanVar(value=self.broadcaster_config.get("default_response", {}).get("enabled", False))
-        ttk.Checkbutton(response_frame, text="デフォルト応答を有効にする", variable=self.default_response_enabled_var).pack(anchor=tk.W, pady=(0, 10))
+        ttk.Checkbutton(response_frame, text="定型メッセージを有効にする", variable=self.default_response_enabled_var).pack(anchor=tk.W, pady=(0, 5))
 
         # 応答タイプ
         type_frame = ttk.Frame(response_frame)
@@ -86,14 +101,16 @@ class BroadcasterEditDialog:
 
         # メッセージ設定
         ttk.Label(response_frame, text="定型メッセージ (1行1メッセージ):").pack(anchor=tk.W)
-        self.messages_text = tk.Text(response_frame, height=4)
-        self.messages_text.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
+        self.messages_text = tk.Text(response_frame, height=2)
+        self.messages_text.pack(fill=tk.X, pady=(0, 5))
         messages = self.broadcaster_config.get("default_response", {}).get("messages", [])
         self.messages_text.insert("1.0", "\n".join(messages))
 
-        ttk.Label(response_frame, text="AIプロンプト:").pack(anchor=tk.W)
-        self.ai_prompt_var = tk.StringVar(value=self.broadcaster_config.get("default_response", {}).get("ai_response_prompt", ""))
-        ttk.Entry(response_frame, textvariable=self.ai_prompt_var).pack(fill=tk.X, pady=2)
+        ttk.Label(response_frame, text="AI応答プロンプト:").pack(anchor=tk.W)
+        self.ai_prompt_text = tk.Text(response_frame, height=3, wrap=tk.WORD)
+        self.ai_prompt_text.pack(fill=tk.X, pady=2)
+        ai_prompt = self.broadcaster_config.get("default_response", {}).get("ai_response_prompt", "")
+        self.ai_prompt_text.insert("1.0", ai_prompt)
 
         # AIプロンプト変数説明
         prompt_help_text = "使用可能な変数: {no}, {user_name}, {user_id}, {comment_content}, {time}, {date}, {datetime}, {broadcaster_name}"
@@ -185,6 +202,12 @@ class BroadcasterEditDialog:
         if not messages:
             messages = [f">>{'{no}'} {broadcaster_name}での挨拶です"]
 
+        # AI分析プロンプトを取得
+        ai_analysis_prompt = self.ai_analysis_prompt_text.get("1.0", tk.END).strip()
+
+        # AI応答プロンプトを取得
+        ai_response_prompt = self.ai_prompt_text.get("1.0", tk.END).strip()
+
         # 最新のトリガー情報を取得
         current_triggers = self.config_manager.get_broadcaster_triggers(self.user_id, broadcaster_id)
         print(f"[GUI DEBUG] Current triggers count: {len(current_triggers)}")
@@ -198,7 +221,9 @@ class BroadcasterEditDialog:
                 "enabled": self.default_response_enabled_var.get(),
                 "response_type": self.response_type_var.get(),
                 "messages": messages,
-                "ai_response_prompt": self.ai_prompt_var.get(),
+                "ai_response_prompt": ai_response_prompt,
+                "ai_analysis_enabled": self.ai_analysis_enabled_var.get(),
+                "ai_analysis_prompt": ai_analysis_prompt,
                 "max_reactions_per_stream": int(self.max_reactions_var.get() or 1),
                 "response_delay_seconds": int(self.delay_var.get() or 0),
                 "response_split_delay_seconds": int(self.split_delay_var.get() or 1)
